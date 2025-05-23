@@ -1,3 +1,6 @@
+from pathlib import Path
+
+updated_final_code_with_paragraph_fix = """
 import os
 import json
 import base64
@@ -13,7 +16,7 @@ import smtplib
 from email.message import EmailMessage
 from pydub import AudioSegment
 
-# === Config ===
+# Configuration
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
 OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
@@ -21,13 +24,13 @@ EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 DEFAULT_EMAIL_RECEIVER = "frnreports@gmail.com"
 BOT_EMAIL = "FRN.ENG@webex.bot"
 TEMPLATE_FILE = "police_report_template.docx"
-STATE_FILE = "user_state.json"
+STATE_FILE = "/mnt/data/user_state.json"
 
-# === Load state ===
+# Load or initialize state
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         user_state = json.load(f)
-        print("✅ Loaded user state.")
+        print("🔄 Loaded user_state")
 else:
     user_state = {}
     print("ℹ️ No previous state found.")
@@ -35,13 +38,11 @@ else:
 def save_user_state():
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(user_state, f, ensure_ascii=False, indent=2)
-        print("💾 User state saved.")
+        print("💾 State saved")
 
-# === Init ===
 app = Flask(__name__)
 client = OpenAI(api_key=OPENAI_KEY)
 
-# === Options ===
 investigator_names = [
     "المقدم محمد علي القاسم", "النقيب عبدالله راشد ال علي",
     "النقيب سليمان محمد الزرعوني", "الملازم أول أحمد خالد الشامسي",
@@ -60,8 +61,9 @@ field_labels = {
     "Investigator": "تم اختيار المحقق"
 }
 
-# === Helpers ===
 def format_paragraph(p):
+    if not p.runs:
+        return  # Skip empty paragraphs
     run = p.runs[0]
     run.font.name = 'Dubai'
     run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Dubai')
@@ -114,9 +116,7 @@ def send_email(subject, body, to, attachment_path):
     msg["To"] = to
     msg.set_content(body)
     with open(attachment_path, "rb") as f:
-        msg.add_attachment(f.read(), maintype="application",
-                           subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
-                           filename=os.path.basename(attachment_path))
+        msg.add_attachment(f.read(), maintype="application", subtype="vnd.openxmlformats-officedocument.wordprocessingml.document", filename=os.path.basename(attachment_path))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
@@ -125,11 +125,10 @@ def send_message(person_id, text, parent_id=None):
     payload = {"toPersonId": person_id, "markdown": text}
     if parent_id:
         payload["parentId"] = parent_id
-    response = requests.post("https://webexapis.com/v1/messages", headers={
+    requests.post("https://webexapis.com/v1/messages", headers={
         "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
         "Content-Type": "application/json"
     }, json=payload)
-    print(f"📨 Sent message: {text[:40]}... (status {response.status_code})")
 
 def send_adaptive_card(person_id):
     buttons = [{"type": "Action.Submit", "title": name, "data": {"investigator": name}} for name in investigator_names]
@@ -139,7 +138,7 @@ def send_adaptive_card(person_id):
         "body": [{"type": "TextBlock", "text": "👤 اختر اسم المحقق:", "weight": "bolder"}],
         "actions": buttons
     }
-    response = requests.post("https://webexapis.com/v1/messages", headers={
+    requests.post("https://webexapis.com/v1/messages", headers={
         "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
         "Content-Type": "application/json"
     }, json={
@@ -147,76 +146,64 @@ def send_adaptive_card(person_id):
         "markdown": "اختر اسم المحقق:",
         "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": card}]
     })
-    print(f"🧾 Sent Adaptive Card (status {response.status_code})")
 
-# === Main webhook ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
     if "data" not in data:
         return "ok"
-
     user_id = data["data"]["personId"]
     email = data["data"].get("personEmail", "")
     if email == BOT_EMAIL:
         return "ok"
-
     room_id = data["data"].get("roomId")
-    message_id = data["data"].get("id")
+    parent_id = data["data"].get("id")
 
     if data["resource"] == "messages":
-        msg = requests.get(
-            f"https://webexapis.com/v1/messages/{message_id}",
-            headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
-        ).json()
-        print(f"📥 Received message from {email}")
-
+        msg_id = data["data"]["id"]
+        msg = requests.get(f"https://webexapis.com/v1/messages/{msg_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         if "files" in msg:
             file_url = msg["files"][0]
             audio_data = requests.get(file_url, headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).content
             tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
             tmp_file.write(audio_data)
             tmp_file.close()
-
             field = user_state.get(user_id, {}).get("step")
             text = transcribe_audio(tmp_file.name)
             enhanced = enhance_field(text, field)
-
             user_state.setdefault(user_id, {}).setdefault("data", {})[field] = enhanced
             next_idx = field_steps.index(field) + 1
             if next_idx < len(field_steps):
                 next_field = field_steps[next_idx]
                 user_state[user_id]["step"] = next_field
-                send_message(user_id, f"{field_labels[field]} ✅\n{field_prompts[next_field]}", message_id)
+                send_message(user_id, f"{field_labels[field]} ✅\\n{field_prompts[next_field]}", parent_id)
             else:
                 data_dict = user_state[user_id]["data"]
-                doc_path = f"/tmp/report_{data_dict['Investigator']}.docx"
+                doc_path = f"/mnt/data/report_{data_dict['Investigator']}.docx"
                 generate_report(data_dict, doc_path)
                 send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, doc_path)
-                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}!", message_id)
+                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}!", parent_id)
                 user_state.pop(user_id)
             save_user_state()
-
         else:
             if user_id not in user_state:
                 user_state[user_id] = {"step": "Investigator", "data": {}}
-                send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n📌 أرسل ملاحظة صوتية عند كل طلب.", message_id)
+                send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id)
                 send_adaptive_card(user_id)
-
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
-        print(f"📌 Processing Adaptive Card action {action_id}")
-        action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={
-            "Authorization": f"Bearer {WEBEX_BOT_TOKEN}"
-        }).json()
+        action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         selection = action_data["inputs"]["investigator"]
-        print(f"✅ Investigator selected: {selection}")
         user_state[user_id] = {"step": "Date", "data": {"Investigator": selection}}
-        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\n{field_prompts['Date']}", message_id)
+        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\\n{field_prompts['Date']}", parent_id)
         save_user_state()
-
     return "ok"
 
-# === Run ===
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+"""
+
+# Save the cleaned code to file
+final_code_path = Path("/mnt/data/final_webex_bot_paragraph_fix.py")
+final_code_path.write_text(updated_final_code_with_paragraph_fix.strip(), encoding="utf-8")
+final_code_path
