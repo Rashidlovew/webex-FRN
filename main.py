@@ -1,5 +1,8 @@
-full_code = '''import os
-import json
+import os
+
+# Prepare the full updated main.py content with proper handling of attachmentAction for Webex cards
+updated_code = '''
+import os
 from flask import Flask, request
 from docxtpl import DocxTemplate
 from docx.shared import Pt
@@ -11,20 +14,19 @@ from email.message import EmailMessage
 import smtplib
 from openai import OpenAI
 import requests
+import json
 
 WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
 
-# === Configuration ===
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
 OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
-DEFAULT_EMAIL_RECEIVER = "frnreports@gmail.com"
+DEFAULT_EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
 
 client = OpenAI(api_key=OPENAI_KEY)
 app = Flask(__name__)
 
-# === Investigator Names ===
 investigator_names = [
     "المقدم محمد علي القاسم",
     "النقيب عبدالله راشد ال علي",
@@ -40,7 +42,6 @@ expected_fields = [
     "Date", "Briefing", "LocationObservations",
     "Examination", "Outcomes", "TechincalOpinion"
 ]
-
 field_prompts = {
     "Date": "🎙️ أرسل تاريخ الواقعة.",
     "Briefing": "🎙️ أرسل موجز الواقعة.",
@@ -49,7 +50,6 @@ field_prompts = {
     "Outcomes": "🎙️ أرسل النتيجة.",
     "TechincalOpinion": "🎙️ أرسل الرأي الفني."
 }
-
 field_names_ar = {
     "Date": "التاريخ",
     "Briefing": "موجز الواقعة",
@@ -58,10 +58,8 @@ field_names_ar = {
     "Outcomes": "النتيجة",
     "TechincalOpinion": "الرأي الفني"
 }
-
 user_state = {}
 
-# === Utilities ===
 def transcribe(file_path):
     audio = AudioSegment.from_file(file_path)
     audio.export("converted.wav", format="wav")
@@ -73,10 +71,9 @@ def enhance_with_gpt(field_name, user_input):
     if field_name == "TechincalOpinion":
         prompt = f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، وباستخدام لغة رسمية وعربية فصحى:\n\n{user_input}"
     elif field_name == "Date":
-        prompt = f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 20/مايو/2025. النص:\n\n{user_input}"
+        prompt = f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 25/مايو/2025. النص:\n\n{user_input}"
     else:
-        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر:\n\n{user_input}"
-
+        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر :\n\n{user_input}"
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -117,37 +114,42 @@ def send_webex_message(room_id, message):
         "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
         "Content-Type": "application/json"
     }
-    payload = {"roomId": room_id, "markdown": message}
+    payload = {
+        "roomId": room_id,
+        "markdown": message
+    }
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
 def send_investigator_card(room_id):
-    card = {
-        "roomId": room_id,
-        "markdown": "🧑‍✈️ الرجاء اختيار اسم الفاحص:",
-        "attachments": [{
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": {
-                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                "type": "AdaptiveCard",
-                "version": "1.4",
-                "body": [{
-                    "type": "TextBlock",
-                    "text": "🧑‍✈️ الرجاء اختيار اسم الفاحص:",
-                    "wrap": True
-                }],
-                "actions": [
-                    {
-                        "type": "Action.Submit",
-                        "title": name,
-                        "data": {"investigator": name}
-                    } for name in investigator_names
-                ]
-            }
-        }]
-    }
     headers = {
         "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
         "Content-Type": "application/json"
+    }
+    card = {
+        "roomId": room_id,
+        "markdown": "يرجى اختيار اسم الفاحص:",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": {
+                "type": "AdaptiveCard",
+                "version": "1.0",
+                "body": [{
+                    "type": "TextBlock",
+                    "text": "🧑‍✈️ اختر اسم الفاحص:",
+                    "weight": "bolder",
+                    "size": "medium"
+                }, {
+                    "type": "Input.ChoiceSet",
+                    "id": "investigator",
+                    "style": "expanded",
+                    "choices": [{"title": name, "value": name} for name in investigator_names]
+                }],
+                "actions": [{
+                    "type": "Action.Submit",
+                    "title": "إرسال"
+                }]
+            }
+        }]
     }
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=card)
 
@@ -158,6 +160,19 @@ def index():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
+
+    if data["resource"] == "attachmentActions":
+        action_id = data["data"]["id"]
+        person_id = data["data"]["personId"]
+        room_id = data["data"]["roomId"]
+        headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
+        r = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers=headers)
+        action_data = r.json()
+        selected_name = action_data["inputs"]["investigator"]
+        user_state[person_id] = {"step": 0, "data": {"Investigator": selected_name}}
+        send_webex_message(room_id, f"🧑‍✈️ تم اختيار {selected_name}.\n{field_prompts[expected_fields[0]]}")
+        return "OK"
+
     room_id = data["data"]["roomId"]
     message_id = data["data"]["id"]
     person_id = data["data"]["personId"]
@@ -169,18 +184,9 @@ def webhook():
     if msg_data.get("personEmail") == WEBEX_BOT_EMAIL:
         return "OK"
 
-    user_state.setdefault(person_id, {})
-    if user_state[person_id].get("message_id_handled") == message_id:
-        return "OK"
-    user_state[person_id]["message_id_handled"] = message_id
-
-    if "data" in data and "investigator" in data["data"]:
-        selected = data["data"]["investigator"]
-        user_state[person_id] = {"step": 0, "data": {"Investigator": selected}, "message_id_handled": message_id}
-        send_webex_message(room_id, f"✅ تم اختيار الفاحص: {selected}\n{field_prompts[expected_fields[0]]}")
-        return "OK"
-
-    if person_id not in user_state or "data" not in user_state[person_id] or "Investigator" not in user_state[person_id]["data"]:
+    if person_id not in user_state:
+        user_state[person_id] = {"step": 0, "data": {}}
+        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.")
         send_investigator_card(room_id)
         return "OK"
 
@@ -192,11 +198,9 @@ def webhook():
         audio = requests.get(file_url, headers=headers)
         with open("voice.mp4", "wb") as f:
             f.write(audio.content)
-
         transcribed = transcribe("voice.mp4")
         current_field = expected_fields[step]
         enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
-
         state["data"][current_field] = enhanced
         state["step"] += 1
 
@@ -207,9 +211,8 @@ def webhook():
             send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
             filename = generate_report(state["data"])
             send_email(filename, DEFAULT_EMAIL_RECEIVER, state["data"]["Investigator"])
-            send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {DEFAULT_EMAIL_RECEIVER}")
+            send_webex_message(room_id, "📩 تم إرسال التقرير إلى frnreports@gmail.com")
             user_state.pop(person_id)
-
     else:
         send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
 
@@ -219,5 +222,8 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
 '''
 
+# Save to file
+with open("/mnt/data/main.py", "w", encoding="utf-8") as f:
+    f.write(updated_code)
 
-"/mnt/data/main.py has been saved with the updated code."
+"/mnt/data/main.py"
