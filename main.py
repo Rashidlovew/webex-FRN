@@ -1,6 +1,6 @@
-# Full updated main.py with /start, /reset, and /help commands
+# Save the full updated main.py including flood protection and commands
 
-main_py_content = """
+full_main_py = """
 import os
 from flask import Flask, request
 from docxtpl import DocxTemplate
@@ -56,7 +56,7 @@ field_names_ar = {
 }
 user_state = {}
 
-# === Utils ===
+# === Utilities ===
 def transcribe(file_path):
     audio = AudioSegment.from_file(file_path)
     audio.export("converted.wav", format="wav")
@@ -133,64 +133,71 @@ def webhook():
     msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
     msg_data = msg_response.json()
 
-    if person_id == msg_data.get("personId"):
-        user_id = person_id
-        message_text = msg_data.get("text", "").strip()
+    # Ignore bot messages
+    if msg_data.get("personId") == person_id:
+        return "OK"
 
-        if message_text == "/start":
-            user_state[user_id] = {"step": 0, "data": {}}
-            send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\nسنجمع المعلومات خطوة بخطوة.\n🟢 للبدء، أرسل تسجيل صوتي يحتوي على:")
-            send_webex_message(room_id, field_prompts[expected_fields[0]])
-            return "OK"
+    # Avoid repeated responses to same message
+    if "message_id_handled" in user_state.get(person_id, {}) and user_state[person_id]["message_id_handled"] == message_id:
+        return "OK"
 
-        elif message_text == "/reset":
-            user_state.pop(user_id, None)
-            send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل /start للبدء من جديد.")
-            return "OK"
+    user_state.setdefault(person_id, {})["message_id_handled"] = message_id
+    message_text = msg_data.get("text", "").strip()
 
-        elif message_text == "/help":
-            help_msg = (
-                "📌 أوامر البوت:\\n"
-                "/start – بدء إدخال تقرير جديد\\n"
-                "/reset – إعادة ضبط الجلسة\\n"
-                "/help – عرض هذه التعليمات\\n"
-                "🎙️ أرسل تسجيل صوتي في كل خطوة"
-            )
-            send_webex_message(room_id, help_msg)
-            return "OK"
+    if message_text == "/start":
+        user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
+        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\\nسنجمع المعلومات خطوة بخطوة.\\n🟢 للبدء، أرسل تسجيل صوتي يحتوي على:")
+        send_webex_message(room_id, field_prompts[expected_fields[0]])
+        return "OK"
 
-        if user_id not in user_state:
-            send_webex_message(room_id, "⚠️ لم يتم بدء جلسة بعد. أرسل /start للبدء.")
-            return "OK"
+    elif message_text == "/reset":
+        user_state.pop(person_id, None)
+        send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل /start للبدء من جديد.")
+        return "OK"
 
-        state = user_state[user_id]
-        step = state["step"]
+    elif message_text == "/help":
+        help_msg = (
+            "📌 أوامر البوت:\\n"
+            "/start – بدء إدخال تقرير جديد\\n"
+            "/reset – إعادة ضبط الجلسة\\n"
+            "/help – عرض هذه التعليمات\\n"
+            "🎙️ أرسل تسجيل صوتي في كل خطوة"
+        )
+        send_webex_message(room_id, help_msg)
+        return "OK"
 
-        if "files" in msg_data:
-            file_url = msg_data["files"][0]
-            audio = requests.get(file_url, headers=headers)
-            with open("voice.mp4", "wb") as f:
-                f.write(audio.content)
+    if person_id not in user_state or "step" not in user_state[person_id]:
+        send_webex_message(room_id, "⚠️ لم يتم بدء جلسة بعد. أرسل /start للبدء.")
+        return "OK"
 
-            transcribed = transcribe("voice.mp4")
-            current_field = expected_fields[step]
-            enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
+    state = user_state[person_id]
+    step = state["step"]
 
-            state["data"][current_field] = enhanced
-            state["step"] += 1
+    if "files" in msg_data:
+        file_url = msg_data["files"][0]
+        audio = requests.get(file_url, headers=headers)
+        with open("voice.mp4", "wb") as f:
+            f.write(audio.content)
 
-            if state["step"] < len(expected_fields):
-                next_field = expected_fields[state["step"]]
-                send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
-            else:
-                send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
-                filename = generate_report(state["data"])
-                email_to = investigator_emails.get(state["data"]["Investigator"], DEFAULT_EMAIL_RECEIVER)
-                send_email(filename, email_to, state["data"]["Investigator"])
-                send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {email_to}")
-                user_state.pop(user_id)
+        transcribed = transcribe("voice.mp4")
+        current_field = expected_fields[step]
+        enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
+
+        state["data"][current_field] = enhanced
+        state["step"] += 1
+
+        if state["step"] < len(expected_fields):
+            next_field = expected_fields[state["step"]]
+            send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
         else:
-            send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
+            send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
+            filename = generate_report(state["data"])
+            email_to = investigator_emails.get(state["data"]["Investigator"], DEFAULT_EMAIL_RECEIVER)
+            send_email(filename, email_to, state["data"]["Investigator"])
+            send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {email_to}")
+            user_state.pop(person_id)
+    else:
+        send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
 
     return "OK"
 
@@ -198,6 +205,8 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
 """
 
+with open("/mnt/data/main.py", "w", encoding="utf-8") as f:
+    f.write(full_main_py)
 
 "/mnt/data/main.py"
 
