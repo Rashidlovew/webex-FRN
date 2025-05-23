@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from docxtpl import DocxTemplate
 from docx.shared import Pt
 from docx.oxml.ns import qn
@@ -10,6 +10,7 @@ from email.message import EmailMessage
 import smtplib
 from openai import OpenAI
 import requests
+import json
 
 WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
 
@@ -33,7 +34,7 @@ investigator_emails = {
 # === Field structure ===
 expected_fields = [
     "Date", "Briefing", "LocationObservations",
-    "Examination", "Outcomes", "TechincalOpinion", "Investigator"
+    "Examination", "Outcomes", "TechincalOpinion"
 ]
 field_prompts = {
     "Date": "🎙️ أرسل تاريخ الواقعة.",
@@ -41,8 +42,7 @@ field_prompts = {
     "LocationObservations": "🎙️ أرسل معاينة الموقع.",
     "Examination": "🎙️ أرسل نتيجة الفحص الفني.",
     "Outcomes": "🎙️ أرسل النتيجة.",
-    "TechincalOpinion": "🎙️ أرسل الرأي الفني.",
-    "Investigator": "🧑‍✈️ أرسل اسم الفاحص."
+    "TechincalOpinion": "🎙️ أرسل الرأي الفني."
 }
 field_names_ar = {
     "Date": "التاريخ",
@@ -50,8 +50,7 @@ field_names_ar = {
     "LocationObservations": "معاينة الموقع",
     "Examination": "نتيجة الفحص الفني",
     "Outcomes": "النتيجة",
-    "TechincalOpinion": "الرأي الفني",
-    "Investigator": "الفاحص"
+    "TechincalOpinion": "الرأي الفني"
 }
 user_state = {}
 
@@ -64,21 +63,13 @@ def transcribe(file_path):
     return result.text
 
 def enhance_with_gpt(field_name, user_input):
-    if field_name == "TechincalOpinion":
-        prompt = (
-            f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، "
-            f"وباستخدام لغة رسمية وعربية فصحى:\n\n{user_input}"
-        )
-    elif field_name == "Date":
-        prompt = (
-            f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 20/مايو/2025. النص:\n\n{user_input}"
-        )
+    if field_name == "الرأي الفني":
+        prompt = f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، وباستخدام لغة رسمية وعربية فصحى:\n\n{user_input}"
+    elif field_name == "التاريخ":
+        prompt = f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 20/مايو/2025. النص:\n\n{user_input}"
     else:
-        prompt = (
-            f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، "
-            f"مع تجنب المشاعر :\n\n{user_input}"
-        )
-
+        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر :\n\n{user_input}"
+    
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -88,8 +79,6 @@ def enhance_with_gpt(field_name, user_input):
 def format_report_doc(path):
     doc = Document(path)
     for paragraph in doc.paragraphs:
-     #   paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-      #  paragraph._element.set(qn("w:rtl"), "1")
         for run in paragraph.runs:
             run.font.name = "Dubai"
             run._element.rPr.rFonts.set(qn("w:eastAsia"), "Dubai")
@@ -132,6 +121,37 @@ def send_webex_message(room_id, message):
     }
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
+def send_investigator_card(room_id):
+    card = {
+        "roomId": room_id,
+        "markdown": "يرجى اختيار اسم الفاحص:",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "type": "AdaptiveCard",
+                "version": "1.3",
+                "body": [{
+                    "type": "TextBlock",
+                    "text": "🧑‍✈️ اختر اسم الفاحص:",
+                    "wrap": True
+                }],
+                "actions": [
+                    {
+                        "type": "Action.Submit",
+                        "title": name,
+                        "data": {"investigator_name": name}
+                    } for name in investigator_emails.keys()
+                ]
+            }
+        }]
+    }
+    headers = {
+        "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    requests.post("https://webexapis.com/v1/messages", headers=headers, json=card)
+
 @app.route("/")
 def index():
     return "Bot is running", 200
@@ -147,57 +167,23 @@ def webhook():
     msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
     msg_data = msg_response.json()
 
-    # Ignore bot's own messages
     if msg_data.get("personEmail") == WEBEX_BOT_EMAIL:
         return "OK"
 
     user_state.setdefault(person_id, {})
     if user_state[person_id].get("message_id_handled") == message_id:
         return "OK"
-
     user_state[person_id]["message_id_handled"] = message_id
-    message_text = msg_data.get("text", "").strip()
 
-    # Handle commands
-    if message_text == "/start":
+    if "investigator_name" in msg_data.get("text", ""):
+        return "OK"  # Let Webex handle card interaction separately
+
+    if person_id not in user_state or "Investigator" not in user_state[person_id]:
         user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
-        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n🟢 أرسل تسجيل صوتي يحتوي على:")
-        send_webex_message(room_id, field_prompts[expected_fields[0]])
+        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.")
+        send_investigator_card(room_id)
         return "OK"
 
-    elif message_text == "/reset":
-        user_state.pop(person_id, None)
-        send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل /start للبدء من جديد.")
-        return "OK"
-
-    elif message_text == "/help":
-        help_msg = (
-            "📌 أوامر البوت:\n"
-            "/start – بدء إدخال تقرير جديد\n"
-            "/reset – إعادة ضبط الجلسة\n"
-            "/help – عرض هذه التعليمات\n"
-            "🎙️ أرسل تسجيل صوتي في كل خطوة"
-        )
-        send_webex_message(room_id, help_msg)
-        return "OK"
-
-    # Welcome message if no session yet
-    if person_id not in user_state or "step" not in user_state[person_id]:
-        user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
-        send_webex_message(room_id, (
-            "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
-            "🎙️ الرجاء إرسال ملاحظة صوتية في كل خطوة.\n"
-            "🧾 الحقول المطلوبة: التاريخ، موجز الواقعة، المعاينة، النتيجة، الرأي الفني، المحقق.\n"
-            "🔄 لإعادة البدء أرسل /reset\n"
-            "ℹ️ للمساعدة أرسل /help"
-        ))
-        send_webex_message(room_id, field_prompts[expected_fields[0]])
-        return "OK"
-
-    state = user_state[person_id]
-    step = state["step"]
-
-    # Handle voice input
     if "files" in msg_data:
         file_url = msg_data["files"][0]
         audio = requests.get(file_url, headers=headers)
@@ -205,25 +191,47 @@ def webhook():
             f.write(audio.content)
 
         transcribed = transcribe("voice.mp4")
-        current_field = expected_fields[step]
+        current_field = expected_fields[user_state[person_id]["step"]]
         enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
 
-        state["data"][current_field] = enhanced
-        state["step"] += 1
+        user_state[person_id]["data"][current_field] = enhanced
+        user_state[person_id]["step"] += 1
 
-        if state["step"] < len(expected_fields):
-            next_field = expected_fields[state["step"]]
+        if user_state[person_id]["step"] < len(expected_fields):
+            next_field = expected_fields[user_state[person_id]["step"]]
             send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
         else:
+            data_collected = user_state[person_id]["data"]
+            data_collected["Investigator"] = user_state[person_id]["Investigator"]
             send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
-            filename = generate_report(state["data"])
-            email_to = investigator_emails.get(state["data"]["Investigator"], DEFAULT_EMAIL_RECEIVER)
-            send_email(filename, email_to, state["data"]["Investigator"])
+            filename = generate_report(data_collected)
+            email_to = investigator_emails.get(data_collected["Investigator"], DEFAULT_EMAIL_RECEIVER)
+            send_email(filename, email_to, data_collected["Investigator"])
             send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {email_to}")
             user_state.pop(person_id)
     else:
         send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
 
+    return "OK"
+
+@app.route("/interact", methods=["POST"])
+def interact():
+    data = request.json
+    person_id = data["data"]["personId"]
+    room_id = data["data"]["roomId"]
+    message_id = data["data"]["id"]
+
+    headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
+    msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
+    msg_data = msg_response.json()
+
+    # Parse JSON from card submission
+    if "investigator_name" in msg_data.get("text", ""):
+        selected = msg_data["text"].split(":")[-1].strip()
+        user_state.setdefault(person_id, {})["Investigator"] = selected
+        user_state[person_id]["step"] = 0
+        user_state[person_id]["data"] = {}
+        send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts[expected_fields[0]]}")
     return "OK"
 
 if __name__ == "__main__":
