@@ -1,7 +1,4 @@
-import os
 
-# Prepare the full updated main.py content with proper handling of attachmentAction for Webex cards
-updated_code = '''
 import os
 from flask import Flask, request
 from docxtpl import DocxTemplate
@@ -69,11 +66,17 @@ def transcribe(file_path):
 
 def enhance_with_gpt(field_name, user_input):
     if field_name == "TechincalOpinion":
-        prompt = f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، وباستخدام لغة رسمية وعربية فصحى:\n\n{user_input}"
+        prompt = f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، وباستخدام لغة رسمية وعربية فصحى:
+
+{user_input}"
     elif field_name == "Date":
-        prompt = f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 25/مايو/2025. النص:\n\n{user_input}"
+        prompt = f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 25/مايو/2025. النص:
+
+{user_input}"
     else:
-        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر :\n\n{user_input}"
+        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر :
+
+{user_input}"
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -102,7 +105,9 @@ def send_email(file_path, recipient, investigator_name):
     msg["Subject"] = "تقرير فحص تلقائي"
     msg["From"] = EMAIL_SENDER
     msg["To"] = recipient
-    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.\n\nمع تحيات فريق العمل، {investigator_name}.")
+    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.
+
+مع تحيات فريق العمل، {investigator_name}.")
     with open(file_path, "rb") as f:
         msg.add_attachment(f.read(), maintype="application", subtype="vnd.openxmlformats-officedocument.wordprocessingml.document", filename=os.path.basename(file_path))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
@@ -170,7 +175,8 @@ def webhook():
         action_data = r.json()
         selected_name = action_data["inputs"]["investigator"]
         user_state[person_id] = {"step": 0, "data": {"Investigator": selected_name}}
-        send_webex_message(room_id, f"🧑‍✈️ تم اختيار {selected_name}.\n{field_prompts[expected_fields[0]]}")
+        send_webex_message(room_id, f"🧑‍✈️ تم اختيار {selected_name}.
+{field_prompts[expected_fields[0]]}")
         return "OK"
 
     room_id = data["data"]["roomId"]
@@ -206,7 +212,8 @@ def webhook():
 
         if state["step"] < len(expected_fields):
             next_field = expected_fields[state["step"]]
-            send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
+            send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.
+{field_prompts[next_field]}")
         else:
             send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
             filename = generate_report(state["data"])
@@ -220,10 +227,3 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
-'''
-
-# Save to file
-with open("/mnt/data/main.py", "w", encoding="utf-8") as f:
-    f.write(updated_code)
-
-"/mnt/data/main.py"
