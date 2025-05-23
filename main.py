@@ -175,6 +175,17 @@ def webhook():
     message_id = data["data"]["id"]
     person_id = data["data"]["personId"]
 
+    # Handle Adaptive Card submit (investigator selection)
+    if "data" in data and "investigator" in data["data"]:
+        selected = data["data"]["investigator"]
+        user_state[person_id] = {
+            "step": 1,
+            "data": {"Investigator": selected},
+            "message_id_handled": message_id
+        }
+        send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
+        return "OK"
+
     headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
     msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
     msg_data = msg_response.json()
@@ -189,19 +200,11 @@ def webhook():
     user_state[person_id]["message_id_handled"] = message_id
     message_text = msg_data.get("text", "").strip()
 
-    # Handle Adaptive Card selection
-    if "attachments" in msg_data and "adaptiveCard" in msg_data["attachments"][0]["contentType"]:
-        choices = msg_data["attachments"][0]["content"]["data"]
-        if "investigator" in choices:
-            user_state[person_id] = {
-                "step": 1,
-                "data": {"Investigator": choices["investigator"]},
-                "message_id_handled": message_id
-            }
-            send_webex_message(room_id, f"✅ تم اختيار {choices['investigator']}.\n{field_prompts['Date']}")
-            return "OK"
+    if message_text == "/reset":
+        user_state.pop(person_id, None)
+        send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل رسالة جديدة للبدء.")
+        return "OK"
 
-    # First time user interaction
     if "step" not in user_state[person_id]:
         send_webex_message(room_id, (
             "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
@@ -210,11 +213,6 @@ def webhook():
             "ℹ️ للمساعدة أرسل /help"
         ))
         send_investigator_card(room_id)
-        return "OK"
-
-    if message_text == "/reset":
-        user_state.pop(person_id, None)
-        send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل رسالة جديدة للبدء.")
         return "OK"
 
     if "files" in msg_data:
