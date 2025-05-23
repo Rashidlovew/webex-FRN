@@ -149,7 +149,6 @@ def webhook():
         person_id = data["data"]["personId"]
         room_id = data["data"]["roomId"]
 
-        # Prevent reprocessing the same action
         if person_id in user_state and user_state[person_id].get("handled_action") == action_id:
             print("⚠️ Duplicate Adaptive Card action ignored", flush=True)
             return "OK"
@@ -183,7 +182,8 @@ def webhook():
     if msg_data.get("personEmail") == WEBEX_BOT_EMAIL:
         return "OK"
 
-    if person_id not in user_state:
+    # ✅ FIXED: Only start new session if not started
+    if person_id not in user_state or "step" not in user_state[person_id]:
         send_webex_message(room_id, (
             "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
             "🎙️ سيتم إدخال البيانات عبر تسجيلات صوتية خطوة بخطوة.\n"
