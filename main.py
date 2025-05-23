@@ -205,8 +205,7 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
 """
 
-with open("/mnt/data/main.py", "w", encoding="utf-8") as f:
-    f.write(full_main_py)
+
 
 "/mnt/data/main.py"
 
