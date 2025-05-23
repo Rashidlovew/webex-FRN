@@ -23,7 +23,7 @@ BOT_EMAIL = "FRN.ENG@webex.bot"
 
 # Persistent storage
 STATE_FILE = "/mnt/data/user_state.json"
-os.makedirs("/mnt/data", exist_ok=True)
+
 
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
