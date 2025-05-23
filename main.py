@@ -1,4 +1,5 @@
 import os
+import json
 from flask import Flask, request
 from docxtpl import DocxTemplate
 from docx.shared import Pt
@@ -9,7 +10,6 @@ from email.message import EmailMessage
 import smtplib
 from openai import OpenAI
 import requests
-import json
 
 WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
@@ -17,6 +17,8 @@ OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 DEFAULT_EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
+
+STATE_FILE = "user_state.json"
 
 client = OpenAI(api_key=OPENAI_KEY)
 app = Flask(__name__)
@@ -55,7 +57,16 @@ field_names_ar = {
     "TechincalOpinion": "الرأي الفني"
 }
 
-user_state = {}
+# === Persistence Helpers ===
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
 
 def transcribe(file_path):
     audio = AudioSegment.from_file(file_path)
@@ -109,7 +120,7 @@ def send_webex_message(room_id, message):
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
 def send_investigator_card(room_id):
-    print("🔁 Sending investigator selection card", flush=True)
+    print("🔁 Sending investigator card")
     card = {
         "roomId": room_id,
         "markdown": "يرجى اختيار اسم الفاحص:",
@@ -124,10 +135,7 @@ def send_investigator_card(room_id):
                     "style": "expanded",
                     "choices": [{"title": name, "value": name} for name in investigator_names]
                 }],
-                "actions": [{
-                    "type": "Action.Submit",
-                    "title": "إرسال"
-                }]
+                "actions": [{"type": "Action.Submit", "title": "إرسال"}]
             }
         }]
     }
@@ -140,8 +148,10 @@ def index():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    user_state = load_state()
+
     data = request.json
-    print("🔥 Incoming Webhook Payload:", json.dumps(data, ensure_ascii=False, indent=2), flush=True)
+    print("🔥 Webhook:", json.dumps(data, ensure_ascii=False, indent=2), flush=True)
 
     if "attachmentActionId" in data["data"]:
         action_id = data["data"]["attachmentActionId"]
@@ -149,7 +159,7 @@ def webhook():
         room_id = data["data"]["roomId"]
 
         if person_id in user_state and user_state[person_id].get("handled_action") == action_id:
-            print(f"⚠️ Duplicate action {action_id} ignored for {person_id}", flush=True)
+            print("⚠️ Duplicate Adaptive Card ignored")
             return "OK"
 
         action_response = requests.get(
@@ -157,17 +167,15 @@ def webhook():
             headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
         )
         action_data = action_response.json()
-        print("📩 Adaptive Card Submission Data:", json.dumps(action_data, ensure_ascii=False, indent=2), flush=True)
-
         selected = action_data["inputs"].get("investigator")
+
         if selected:
-            print(f"✅ Investigator selected: {selected}", flush=True)
             user_state[person_id] = {
                 "step": 1,
                 "data": {"Investigator": selected},
                 "handled_action": action_id
             }
-            print(f"🧠 user_state[{person_id}] set with step = 1", flush=True)
+            save_state(user_state)
             send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
             return "OK"
 
@@ -183,7 +191,6 @@ def webhook():
         return "OK"
 
     if person_id not in user_state or "step" not in user_state[person_id]:
-        print(f"🚨 user_state[{person_id}] is new or missing 'step'", flush=True)
         send_webex_message(room_id, (
             "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
             "🎙️ سيتم إدخال البيانات عبر تسجيلات صوتية خطوة بخطوة.\n"
@@ -194,8 +201,8 @@ def webhook():
         return "OK"
 
     if msg_data.get("text", "").strip() == "/reset":
-        print(f"🔄 Session reset for {person_id}", flush=True)
         user_state.pop(person_id, None)
+        save_state(user_state)
         send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل رسالة جديدة للبدء.")
         return "OK"
 
@@ -203,8 +210,6 @@ def webhook():
         state = user_state[person_id]
         step = state["step"]
         current_field = expected_fields[step]
-
-        print(f"🎧 Received voice for field: {current_field} (step {step})", flush=True)
 
         file_url = msg_data["files"][0]
         audio = requests.get(file_url, headers=headers)
@@ -216,7 +221,8 @@ def webhook():
 
         state["data"][current_field] = enhanced
         state["step"] += 1
-        print(f"✅ Field '{current_field}' saved. Next step: {state['step']}", flush=True)
+        user_state[person_id] = state
+        save_state(user_state)
 
         if state["step"] < len(expected_fields):
             next_field = expected_fields[state["step"]]
@@ -227,6 +233,7 @@ def webhook():
             send_email(filename, DEFAULT_EMAIL_RECEIVER, state["data"]["Investigator"])
             send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {DEFAULT_EMAIL_RECEIVER}")
             user_state.pop(person_id)
+            save_state(user_state)
     else:
         send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
 
