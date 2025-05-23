@@ -13,5 +13,5 @@ services:
         value: your-email@gmail.com
       - key: EMAIL_PASSWORD
         value: your-app-password
-      - key: RENDER_EXTERNAL_URL
-        value: https://your-service-name.onrender.com
+      - key: EMAIL_RECEIVER
+        value: frnreports@gmail.com  
