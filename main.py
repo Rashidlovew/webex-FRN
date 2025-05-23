@@ -3,7 +3,6 @@ from flask import Flask, request
 from docxtpl import DocxTemplate
 from docx.shared import Pt
 from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx import Document
 from pydub import AudioSegment
 from email.message import EmailMessage
@@ -13,7 +12,6 @@ import requests
 import json
 
 WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
-
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
 OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
@@ -111,6 +109,7 @@ def send_webex_message(room_id, message):
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
 def send_investigator_card(room_id):
+    print("🔁 Sending investigator selection card", flush=True)
     card = {
         "roomId": room_id,
         "markdown": "يرجى اختيار اسم الفاحص:",
@@ -150,7 +149,7 @@ def webhook():
         room_id = data["data"]["roomId"]
 
         if person_id in user_state and user_state[person_id].get("handled_action") == action_id:
-            print("⚠️ Duplicate Adaptive Card action ignored", flush=True)
+            print(f"⚠️ Duplicate action {action_id} ignored for {person_id}", flush=True)
             return "OK"
 
         action_response = requests.get(
@@ -168,6 +167,7 @@ def webhook():
                 "data": {"Investigator": selected},
                 "handled_action": action_id
             }
+            print(f"🧠 user_state[{person_id}] set with step = 1", flush=True)
             send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
             return "OK"
 
@@ -182,8 +182,8 @@ def webhook():
     if msg_data.get("personEmail") == WEBEX_BOT_EMAIL:
         return "OK"
 
-    # ✅ FIXED: Only start new session if not started
     if person_id not in user_state or "step" not in user_state[person_id]:
+        print(f"🚨 user_state[{person_id}] is new or missing 'step'", flush=True)
         send_webex_message(room_id, (
             "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
             "🎙️ سيتم إدخال البيانات عبر تسجيلات صوتية خطوة بخطوة.\n"
@@ -194,6 +194,7 @@ def webhook():
         return "OK"
 
     if msg_data.get("text", "").strip() == "/reset":
+        print(f"🔄 Session reset for {person_id}", flush=True)
         user_state.pop(person_id, None)
         send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل رسالة جديدة للبدء.")
         return "OK"
@@ -202,6 +203,8 @@ def webhook():
         state = user_state[person_id]
         step = state["step"]
         current_field = expected_fields[step]
+
+        print(f"🎧 Received voice for field: {current_field} (step {step})", flush=True)
 
         file_url = msg_data["files"][0]
         audio = requests.get(file_url, headers=headers)
@@ -213,6 +216,7 @@ def webhook():
 
         state["data"][current_field] = enhanced
         state["step"] += 1
+        print(f"✅ Field '{current_field}' saved. Next step: {state['step']}", flush=True)
 
         if state["step"] < len(expected_fields):
             next_field = expected_fields[state["step"]]
