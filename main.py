@@ -1,10 +1,6 @@
-# Full code generation in a separate cell due to length
-# Preparing the full bot code as requested by the user
 from pathlib import Path
 
-code_path = Path("/mnt/data/final_webex_bot.py")
-
-final_code = """
+final_clean_code = """
 import os
 import json
 import base64
@@ -177,13 +173,13 @@ def webhook():
                 doc_path = f"/mnt/data/report_{data['Investigator']}.docx"
                 generate_report(data, doc_path)
                 send_email("تم إنشاء التقرير", f"شكرًا {data['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, doc_path)
-                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data['Investigator']}!")
+                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\\nشكراً لك {data['Investigator']}!")
                 user_state.pop(user_id)
             save_user_state()
         else:
             if user_id not in user_state:
                 user_state[user_id] = {"step": "Investigator", "data": {}}
-                send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n📌 أرسل ملاحظة صوتية عند كل طلب.")
+                send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\\n📌 أرسل ملاحظة صوتية عند كل طلب.")
                 send_adaptive_card(user_id)
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
@@ -198,5 +194,6 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
 """
 
-code_path.write_text(final_code.strip(), encoding="utf-8")
-code_path
+clean_path = Path("/mnt/data/final_clean_webex_bot.py")
+clean_path.write_text(final_clean_code.strip(), encoding="utf-8")
+clean_path
