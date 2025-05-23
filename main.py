@@ -175,16 +175,24 @@ def webhook():
     message_id = data["data"]["id"]
     person_id = data["data"]["personId"]
 
-    # Handle Adaptive Card submit (investigator selection)
-    if "data" in data and "investigator" in data["data"]:
-        selected = data["data"]["investigator"]
-        user_state[person_id] = {
-            "step": 1,
-            "data": {"Investigator": selected},
-            "message_id_handled": message_id
-        }
-        send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
-        return "OK"
+    # Handle Adaptive Card submit action
+    if "attachmentActionId" in data["data"]:
+        action_id = data["data"]["attachmentActionId"]
+        action_response = requests.get(
+            f"https://webexapis.com/v1/attachment/actions/{action_id}",
+            headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
+        )
+        action_data = action_response.json()
+        selected = action_data["inputs"].get("investigator")
+
+        if selected:
+            user_state[person_id] = {
+                "step": 1,
+                "data": {"Investigator": selected},
+                "message_id_handled": message_id
+            }
+            send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
+            return "OK"
 
     headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
     msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
