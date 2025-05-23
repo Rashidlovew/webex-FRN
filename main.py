@@ -149,6 +149,11 @@ def webhook():
         person_id = data["data"]["personId"]
         room_id = data["data"]["roomId"]
 
+        # Prevent reprocessing the same action
+        if person_id in user_state and user_state[person_id].get("handled_action") == action_id:
+            print("⚠️ Duplicate Adaptive Card action ignored", flush=True)
+            return "OK"
+
         action_response = requests.get(
             f"https://webexapis.com/v1/attachment/actions/{action_id}",
             headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
@@ -161,7 +166,8 @@ def webhook():
             print(f"✅ Investigator selected: {selected}", flush=True)
             user_state[person_id] = {
                 "step": 1,
-                "data": {"Investigator": selected}
+                "data": {"Investigator": selected},
+                "handled_action": action_id
             }
             send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
             return "OK"
