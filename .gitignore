@@ -3,3 +3,4 @@ __pycache__/
 converted.wav
 voice.ogg
 .env
+# DO NOT ignore user_state.json
