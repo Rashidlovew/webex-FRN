@@ -219,7 +219,5 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
 '''
 
-with open("/mnt/data/main.py", "w", encoding="utf-8") as f:
-    f.write(full_code)
 
 "/mnt/data/main.py has been saved with the updated code."
