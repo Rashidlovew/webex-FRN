@@ -17,7 +17,6 @@ OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 DEFAULT_EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
-
 STATE_FILE = "user_state.json"
 
 client = OpenAI(api_key=OPENAI_KEY)
@@ -57,7 +56,6 @@ field_names_ar = {
     "TechincalOpinion": "الرأي الفني"
 }
 
-# === Persistence Helpers ===
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
@@ -120,7 +118,7 @@ def send_webex_message(room_id, message):
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
 def send_investigator_card(room_id):
-    print("🔁 Sending investigator card")
+    print("🔁 Sending investigator card", flush=True)
     card = {
         "roomId": room_id,
         "markdown": "يرجى اختيار اسم الفاحص:",
@@ -149,27 +147,32 @@ def index():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     user_state = load_state()
-
     data = request.json
     print("🔥 Webhook:", json.dumps(data, ensure_ascii=False, indent=2), flush=True)
 
+    # Handle adaptive card selection
     if "attachmentActionId" in data["data"]:
         action_id = data["data"]["attachmentActionId"]
         person_id = data["data"]["personId"]
         room_id = data["data"]["roomId"]
 
+        print(f"📩 Adaptive card action from: {person_id}, action: {action_id}", flush=True)
+
         if person_id in user_state and user_state[person_id].get("handled_action") == action_id:
-            print("⚠️ Duplicate Adaptive Card ignored")
+            print("⚠️ Duplicate Adaptive Card action ignored", flush=True)
             return "OK"
 
+        # Fetch card submission data
         action_response = requests.get(
             f"https://webexapis.com/v1/attachment/actions/{action_id}",
             headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
         )
         action_data = action_response.json()
-        selected = action_data["inputs"].get("investigator")
+        print("📩 Adaptive Card Submission Data:", json.dumps(action_data, ensure_ascii=False, indent=2), flush=True)
 
+        selected = action_data["inputs"].get("investigator")
         if selected:
+            print(f"✅ Investigator selected: {selected}", flush=True)
             user_state[person_id] = {
                 "step": 1,
                 "data": {"Investigator": selected},
@@ -177,7 +180,9 @@ def webhook():
             }
             save_state(user_state)
             send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
-            return "OK"
+        else:
+            send_webex_message(room_id, "⚠️ لم يتم اختيار اسم الفاحص بشكل صحيح.")
+        return "OK"
 
     room_id = data["data"]["roomId"]
     message_id = data["data"]["id"]
@@ -191,12 +196,12 @@ def webhook():
         return "OK"
 
     if person_id not in user_state or "step" not in user_state[person_id]:
-        send_webex_message(room_id, (
+        send_webex_message(room_id,
             "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
             "🎙️ سيتم إدخال البيانات عبر تسجيلات صوتية خطوة بخطوة.\n"
             "🔄 لإعادة البدء أرسل /reset\n"
             "ℹ️ للمساعدة أرسل /help"
-        ))
+        )
         send_investigator_card(room_id)
         return "OK"
 
