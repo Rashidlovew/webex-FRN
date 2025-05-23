@@ -171,6 +171,9 @@ def index():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
+    print("🔥 Incoming Webhook Payload:")
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+
     room_id = data["data"]["roomId"]
     message_id = data["data"]["id"]
     person_id = data["data"]["personId"]
@@ -183,9 +186,13 @@ def webhook():
             headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
         )
         action_data = action_response.json()
+        print("📩 Adaptive Card Submission Data:")
+        print(json.dumps(action_data, ensure_ascii=False, indent=2))
+
         selected = action_data["inputs"].get("investigator")
 
         if selected:
+            print(f"✅ Investigator selected: {selected}")
             user_state[person_id] = {
                 "step": 1,
                 "data": {"Investigator": selected},
