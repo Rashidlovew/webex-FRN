@@ -1,6 +1,3 @@
-# Save the full updated main.py including flood protection and commands
-
-full_main_py = """
 import os
 from flask import Flask, request
 from docxtpl import DocxTemplate
@@ -67,7 +64,7 @@ def transcribe(file_path):
 def enhance_with_gpt(field_name, user_input):
     prompt = (
         f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، "
-        f"مع تجنب المشاعر :\\n\\n{user_input}"
+        f"مع تجنب المشاعر :\n\n{user_input}"
     )
     response = client.chat.completions.create(
         model="gpt-4",
@@ -99,7 +96,7 @@ def send_email(file_path, recipient, investigator_name):
     msg["Subject"] = "تقرير تحقيق تلقائي"
     msg["From"] = EMAIL_SENDER
     msg["To"] = recipient
-    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.\\n\\nمع تحيات فريق العمل، {investigator_name}.")
+    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.\n\nمع تحيات فريق العمل، {investigator_name}.")
     with open(file_path, "rb") as f:
         msg.add_attachment(
             f.read(),
@@ -122,6 +119,10 @@ def send_webex_message(room_id, message):
     }
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
+@app.route("/")
+def index():
+    return "Bot is running", 200
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -133,11 +134,9 @@ def webhook():
     msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
     msg_data = msg_response.json()
 
-    # Ignore bot messages
     if msg_data.get("personId") == person_id:
         return "OK"
 
-    # Avoid repeated responses to same message
     if "message_id_handled" in user_state.get(person_id, {}) and user_state[person_id]["message_id_handled"] == message_id:
         return "OK"
 
@@ -146,7 +145,7 @@ def webhook():
 
     if message_text == "/start":
         user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
-        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\\nسنجمع المعلومات خطوة بخطوة.\\n🟢 للبدء، أرسل تسجيل صوتي يحتوي على:")
+        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\nسنجمع المعلومات خطوة بخطوة.\n🟢 للبدء، أرسل تسجيل صوتي يحتوي على:")
         send_webex_message(room_id, field_prompts[expected_fields[0]])
         return "OK"
 
@@ -157,10 +156,10 @@ def webhook():
 
     elif message_text == "/help":
         help_msg = (
-            "📌 أوامر البوت:\\n"
-            "/start – بدء إدخال تقرير جديد\\n"
-            "/reset – إعادة ضبط الجلسة\\n"
-            "/help – عرض هذه التعليمات\\n"
+            "📌 أوامر البوت:\n"
+            "/start – بدء إدخال تقرير جديد\n"
+            "/reset – إعادة ضبط الجلسة\n"
+            "/help – عرض هذه التعليمات\n"
             "🎙️ أرسل تسجيل صوتي في كل خطوة"
         )
         send_webex_message(room_id, help_msg)
@@ -203,9 +202,3 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
-"""
-
-
-
-"/mnt/data/main.py"
-
