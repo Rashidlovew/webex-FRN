@@ -1,9 +1,3 @@
-from pathlib import Path
-
-# Prepare updated final code
-updated_code_path = Path("/mnt/data/final_fixed_webex_bot.py")
-
-updated_bot_code = """
 import os
 import json
 import base64
@@ -29,6 +23,8 @@ BOT_EMAIL = "FRN.ENG@webex.bot"
 
 # Persistent storage
 STATE_FILE = "/mnt/data/user_state.json"
+os.makedirs("/mnt/data", exist_ok=True)
+
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         user_state = json.load(f)
@@ -36,7 +32,6 @@ else:
     user_state = {}
 
 def save_user_state():
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(user_state, f, ensure_ascii=False, indent=2)
         print("💾 State saved")
@@ -171,7 +166,7 @@ def webhook():
             if next_idx < len(field_steps):
                 next_field = field_steps[next_idx]
                 user_state[user_id]["step"] = next_field
-                send_message(user_id, f"{field_labels[field]} ✅\\n{field_prompts[next_field]}")
+                send_message(user_id, f"{field_labels[field]} ✅\n{field_prompts[next_field]}")
             else:
                 data = user_state[user_id]["data"]
                 doc_path = f"/mnt/data/report_{data['Investigator']}.docx"
@@ -190,13 +185,9 @@ def webhook():
         action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         selection = action_data["inputs"]["investigator"]
         user_state[user_id] = {"step": "Date", "data": {"Investigator": selection}}
-        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\\n{field_prompts['Date']}")
+        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\n{field_prompts['Date']}")
         save_user_state()
     return "ok"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
-"""
-
-updated_code_path.write_text(updated_bot_code.strip(), encoding="utf-8")
-updated_code_path
