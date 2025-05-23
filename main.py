@@ -1,4 +1,6 @@
+from pathlib import Path
 
+main_py_code = '''
 import os
 from flask import Flask, request
 from docxtpl import DocxTemplate
@@ -11,10 +13,10 @@ from email.message import EmailMessage
 import smtplib
 from openai import OpenAI
 import requests
-import json
 
 WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
 
+# === Configuration ===
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
 OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
@@ -24,6 +26,7 @@ DEFAULT_EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
 client = OpenAI(api_key=OPENAI_KEY)
 app = Flask(__name__)
 
+# === Investigator names ===
 investigator_names = [
     "المقدم محمد علي القاسم",
     "النقيب عبدالله راشد ال علي",
@@ -35,11 +38,13 @@ investigator_names = [
     "المدني حمده ماجد ال علي"
 ]
 
+# === Field structure ===
 expected_fields = [
-    "Date", "Briefing", "LocationObservations",
+    "Investigator", "Date", "Briefing", "LocationObservations",
     "Examination", "Outcomes", "TechincalOpinion"
 ]
 field_prompts = {
+    "Investigator": "🧑‍✈️ اختر اسم الفاحص من الأزرار أدناه.",
     "Date": "🎙️ أرسل تاريخ الواقعة.",
     "Briefing": "🎙️ أرسل موجز الواقعة.",
     "LocationObservations": "🎙️ أرسل معاينة الموقع.",
@@ -53,10 +58,12 @@ field_names_ar = {
     "LocationObservations": "معاينة الموقع",
     "Examination": "نتيجة الفحص الفني",
     "Outcomes": "النتيجة",
-    "TechincalOpinion": "الرأي الفني"
+    "TechincalOpinion": "الرأي الفني",
+    "Investigator": "الفاحص"
 }
 user_state = {}
 
+# === Utilities ===
 def transcribe(file_path):
     audio = AudioSegment.from_file(file_path)
     audio.export("converted.wav", format="wav")
@@ -66,17 +73,19 @@ def transcribe(file_path):
 
 def enhance_with_gpt(field_name, user_input):
     if field_name == "TechincalOpinion":
-        prompt = f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، وباستخدام لغة رسمية وعربية فصحى:
-
-{user_input}"
+        prompt = (
+            f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، "
+            f"وباستخدام لغة رسمية وعربية فصحى:\n\n{user_input}"
+        )
     elif field_name == "Date":
-        prompt = f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 25/مايو/2025. النص:
-
-{user_input}"
+        prompt = (
+            f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 25/مايو/2025. النص:\n\n{user_input}"
+        )
     else:
-        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر :
-
-{user_input}"
+        prompt = (
+            f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، "
+            f"مع تجنب المشاعر:\n\n{user_input}"
+        )
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -105,11 +114,14 @@ def send_email(file_path, recipient, investigator_name):
     msg["Subject"] = "تقرير فحص تلقائي"
     msg["From"] = EMAIL_SENDER
     msg["To"] = recipient
-    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.
-
-مع تحيات فريق العمل، {investigator_name}.")
+    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.\n\nمع تحيات فريق العمل، {investigator_name}.")
     with open(file_path, "rb") as f:
-        msg.add_attachment(f.read(), maintype="application", subtype="vnd.openxmlformats-officedocument.wordprocessingml.document", filename=os.path.basename(file_path))
+        msg.add_attachment(
+            f.read(),
+            maintype="application",
+            subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=os.path.basename(file_path)
+        )
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
@@ -125,39 +137,6 @@ def send_webex_message(room_id, message):
     }
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
-def send_investigator_card(room_id):
-    headers = {
-        "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    card = {
-        "roomId": room_id,
-        "markdown": "يرجى اختيار اسم الفاحص:",
-        "attachments": [{
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": {
-                "type": "AdaptiveCard",
-                "version": "1.0",
-                "body": [{
-                    "type": "TextBlock",
-                    "text": "🧑‍✈️ اختر اسم الفاحص:",
-                    "weight": "bolder",
-                    "size": "medium"
-                }, {
-                    "type": "Input.ChoiceSet",
-                    "id": "investigator",
-                    "style": "expanded",
-                    "choices": [{"title": name, "value": name} for name in investigator_names]
-                }],
-                "actions": [{
-                    "type": "Action.Submit",
-                    "title": "إرسال"
-                }]
-            }
-        }]
-    }
-    requests.post("https://webexapis.com/v1/messages", headers=headers, json=card)
-
 @app.route("/")
 def index():
     return "Bot is running", 200
@@ -165,20 +144,6 @@ def index():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
-
-    if data["resource"] == "attachmentActions":
-        action_id = data["data"]["id"]
-        person_id = data["data"]["personId"]
-        room_id = data["data"]["roomId"]
-        headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
-        r = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers=headers)
-        action_data = r.json()
-        selected_name = action_data["inputs"]["investigator"]
-        user_state[person_id] = {"step": 0, "data": {"Investigator": selected_name}}
-        send_webex_message(room_id, f"🧑‍✈️ تم اختيار {selected_name}.
-{field_prompts[expected_fields[0]]}")
-        return "OK"
-
     room_id = data["data"]["roomId"]
     message_id = data["data"]["id"]
     person_id = data["data"]["personId"]
@@ -190,40 +155,79 @@ def webhook():
     if msg_data.get("personEmail") == WEBEX_BOT_EMAIL:
         return "OK"
 
-    if person_id not in user_state:
-        user_state[person_id] = {"step": 0, "data": {}}
-        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.")
-        send_investigator_card(room_id)
+    user_state.setdefault(person_id, {})
+    if user_state[person_id].get("message_id_handled") == message_id:
         return "OK"
 
-    state = user_state[person_id]
-    step = state["step"]
+    user_state[person_id]["message_id_handled"] = message_id
+    message_text = msg_data.get("text", "").strip()
 
-    if "files" in msg_data:
-        file_url = msg_data["files"][0]
-        audio = requests.get(file_url, headers=headers)
-        with open("voice.mp4", "wb") as f:
-            f.write(audio.content)
-        transcribed = transcribe("voice.mp4")
-        current_field = expected_fields[step]
-        enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
-        state["data"][current_field] = enhanced
-        state["step"] += 1
+    if message_text == "/start":
+        user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
+        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n🧑‍✈️ اختر اسم الفاحص:")
+        for name in investigator_names:
+            send_webex_message(room_id, f"- {name}")
+        return "OK"
 
-        if state["step"] < len(expected_fields):
-            next_field = expected_fields[state["step"]]
-            send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.
-{field_prompts[next_field]}")
+    elif message_text == "/reset":
+        user_state.pop(person_id, None)
+        send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل /start للبدء من جديد.")
+        return "OK"
+
+    elif person_id in user_state and "step" in user_state[person_id]:
+        step = user_state[person_id]["step"]
+        state = user_state[person_id]
+
+        if step == 0:
+            if message_text in investigator_names:
+                state["data"]["Investigator"] = message_text
+                state["step"] += 1
+                next_field = expected_fields[state["step"]]
+                send_webex_message(room_id, f"✅ تم اختيار {message_text}.\n{field_prompts[next_field]}")
+            else:
+                send_webex_message(room_id, "❗ يرجى اختيار اسم فاحص صحيح من القائمة.")
+            return "OK"
+
+        if "files" in msg_data:
+            file_url = msg_data["files"][0]
+            audio = requests.get(file_url, headers=headers)
+            with open("voice.mp4", "wb") as f:
+                f.write(audio.content)
+
+            transcribed = transcribe("voice.mp4")
+            current_field = expected_fields[step]
+            enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
+
+            state["data"][current_field] = enhanced
+            state["step"] += 1
+
+            if state["step"] < len(expected_fields):
+                next_field = expected_fields[state["step"]]
+                send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
+            else:
+                send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
+                filename = generate_report(state["data"])
+                send_email(filename, DEFAULT_EMAIL_RECEIVER, state["data"]["Investigator"])
+                send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {DEFAULT_EMAIL_RECEIVER}")
+                user_state.pop(person_id)
+
         else:
-            send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
-            filename = generate_report(state["data"])
-            send_email(filename, DEFAULT_EMAIL_RECEIVER, state["data"]["Investigator"])
-            send_webex_message(room_id, "📩 تم إرسال التقرير إلى frnreports@gmail.com")
-            user_state.pop(person_id)
+            send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
+
     else:
-        send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
+        send_webex_message(room_id, (
+            "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n"
+            "🎙️ الرجاء إرسال /start للبدء."
+        ))
 
     return "OK"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+'''
+
+# Save to file
+file_path = Path("/mnt/data/main.py")
+file_path.write_text(main_py_code.strip(), encoding="utf-8")
+
+file_path.name
