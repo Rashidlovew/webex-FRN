@@ -165,8 +165,17 @@ def webhook():
         send_webex_message(room_id, help_msg)
         return "OK"
 
+    # Welcome message if session not started
     if person_id not in user_state or "step" not in user_state[person_id]:
-        send_webex_message(room_id, "⚠️ لم يتم بدء جلسة بعد. أرسل /start للبدء.")
+        user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
+        send_webex_message(room_id, (
+            "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
+            "🎙️ الرجاء إرسال ملاحظة صوتية في كل خطوة.\n"
+            "🧾 الحقول المطلوبة: التاريخ، موجز الواقعة، المعاينة، النتيجة، الرأي الفني، المحقق.\n"
+            "🔄 لإعادة البدء أرسل /reset\n"
+            "ℹ️ للمساعدة أرسل /help"
+        ))
+        send_webex_message(room_id, field_prompts[expected_fields[0]])
         return "OK"
 
     state = user_state[person_id]
