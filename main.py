@@ -26,13 +26,12 @@ investigator_emails = {
     "المقدم محمد علي القاسم": "mohammed@example.com",
     "النقيب عبدالله راشد ال علي": "abdullah@example.com",
     "النقيب سليمان محمد الزرعوني": "sulaiman@example.com",
-    # ... add more if needed
 }
 
 # === Field structure ===
 expected_fields = [
     "Date", "Briefing", "LocationObservations",
-    "Examination", "Outcomes", "TechincalOpinion"
+    "Examination", "Outcomes", "TechincalOpinion", "Investigator"
 ]
 field_prompts = {
     "Date": "🎙️ أرسل تاريخ الواقعة.",
@@ -40,7 +39,8 @@ field_prompts = {
     "LocationObservations": "🎙️ أرسل معاينة الموقع.",
     "Examination": "🎙️ أرسل نتيجة الفحص الفني.",
     "Outcomes": "🎙️ أرسل النتيجة.",
-    "TechincalOpinion": "🎙️ أرسل الرأي الفني."
+    "TechincalOpinion": "🎙️ أرسل الرأي الفني.",
+    "Investigator": "🧑‍✈️ أرسل اسم المحقق."
 }
 field_names_ar = {
     "Date": "التاريخ",
@@ -48,11 +48,12 @@ field_names_ar = {
     "LocationObservations": "معاينة الموقع",
     "Examination": "نتيجة الفحص الفني",
     "Outcomes": "النتيجة",
-    "TechincalOpinion": "الرأي الفني"
+    "TechincalOpinion": "الرأي الفني",
+    "Investigator": "المحقق"
 }
 user_state = {}
 
-# === Utilities ===
+# === Utils ===
 def transcribe(file_path):
     audio = AudioSegment.from_file(file_path)
     audio.export("converted.wav", format="wav")
@@ -118,14 +119,61 @@ def send_webex_message(room_id, message):
     }
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
+def get_next_field(current_fields):
+    for field in expected_fields:
+        if field not in current_fields:
+            return field
+    return None
+
 # === Webhook handler ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
-    person_id = data["data"]["personId"]
     room_id = data["data"]["roomId"]
-    # You'll implement full state handling and file processing here
-    send_webex_message(room_id, "🔧 البوت قيد التطوير. سيتم الرد قريباً...")
+    message_id = data["data"]["id"]
+    person_id = data["data"]["personId"]
+
+    headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
+    msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
+    msg_data = msg_response.json()
+
+    if person_id == msg_data.get("personId"):
+        user_id = person_id
+
+        if user_id not in user_state:
+            user_state[user_id] = {"step": 0, "data": {}}
+            send_webex_message(room_id, "🤖 أهلاً بك. سنبدأ بجمع معلومات التقرير خطوة بخطوة.")
+            send_webex_message(room_id, field_prompts[expected_fields[0]])
+        else:
+            state = user_state[user_id]
+            step = state["step"]
+
+            if "files" in msg_data:
+                file_url = msg_data["files"][0]
+                audio = requests.get(file_url, headers=headers)
+                with open("voice.mp4", "wb") as f:
+                    f.write(audio.content)
+
+                transcribed = transcribe("voice.mp4")
+                current_field = expected_fields[step]
+                enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
+
+                state["data"][current_field] = enhanced
+                state["step"] += 1
+
+                if state["step"] < len(expected_fields):
+                    next_field = expected_fields[state["step"]]
+                    send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
+                else:
+                    send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
+                    filename = generate_report(state["data"])
+                    email_to = investigator_emails.get(state["data"]["Investigator"], DEFAULT_EMAIL_RECEIVER)
+                    send_email(filename, email_to, state["data"]["Investigator"])
+                    send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {email_to}")
+                    user_state.pop(user_id)
+            else:
+                send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
+
     return "OK"
 
 if __name__ == "__main__":
