@@ -7,7 +7,6 @@ from openai import OpenAI
 from docxtpl import DocxTemplate
 from docx.shared import Pt
 from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import smtplib
 from email.message import EmailMessage
 from pydub import AudioSegment
@@ -22,14 +21,14 @@ BOT_EMAIL = "FRN.ENG@webex.bot"
 TEMPLATE_FILE = "police_report_template.docx"
 STATE_FILE = "user_state.json"
 
-# Load or initialize state
+# Load state
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         user_state = json.load(f)
         print("ℹ️ Loaded previous state")
 else:
     user_state = {}
-    print("ℹ️ No previous state found.")
+    print("ℹ️ No previous state found")
 
 def save_user_state():
     with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -51,9 +50,9 @@ field_prompts = {
     "Briefing": "📝 الرجاء إرسال ملخص الفحص كملاحظة صوتية."
 }
 field_labels = {
+    "Investigator": "تم اختيار المحقق",
     "Date": "تم تسجيل التاريخ",
-    "Briefing": "تم تسجيل الملخص",
-    "Investigator": "تم اختيار المحقق"
+    "Briefing": "تم تسجيل الملخص"
 }
 
 def format_paragraph(p):
@@ -114,7 +113,10 @@ def send_email(subject, body, to, attachment_path):
         smtp.send_message(msg)
 
 def send_message(person_id, text, parent_id=None):
-    payload = {"toPersonId": person_id, "markdown": text}
+    payload = {
+        "toPersonId": person_id,
+        "markdown": text
+    }
     if parent_id:
         payload["parentId"] = parent_id
     requests.post("https://webexapis.com/v1/messages", headers={
@@ -146,7 +148,7 @@ def webhook():
         return "ok"
     user_id = data["data"]["personId"]
     email = data["data"].get("personEmail", "")
-    parent_id = data["data"]["id"]
+    parent_id = data["data"].get("id", None)
     if email == BOT_EMAIL:
         return "ok"
 
@@ -165,6 +167,7 @@ def webhook():
             text = transcribe_audio(tmp_file.name)
             result = enhance_field(text, step)
             user_state.setdefault(user_id, {}).setdefault("data", {})[step] = result
+
             next_index = field_steps.index(step) + 1
             if next_index < len(field_steps):
                 next_step = field_steps[next_index]
@@ -172,6 +175,9 @@ def webhook():
                 send_message(user_id, f"{field_labels[step]} ✅\n{field_prompts[next_step]}", parent_id)
             else:
                 data_dict = user_state[user_id]["data"]
+                if not all(key in data_dict for key in field_steps[1:]):
+                    send_message(user_id, "❗ البيانات غير مكتملة. تأكد من إرسال جميع الملاحظات الصوتية.", parent_id)
+                    return "ok"
                 report_file = f"report_{data_dict['Investigator']}.docx"
                 generate_report(data_dict, report_file)
                 send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
@@ -183,13 +189,14 @@ def webhook():
                 user_state[user_id] = {"step": "Investigator", "data": {}}
                 send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id)
                 send_adaptive_card(user_id)
+
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
         action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         selection = action_data["inputs"]["investigator"]
         user_state[user_id] = {"step": "Date", "data": {"Investigator": selection}}
-        send_message(user_id, f"{field_labels['Investigator']} ✅\n{field_prompts['Date']}", parent_id)
         save_user_state()
+        send_message(user_id, f"{field_labels['Investigator']} ✅\n{field_prompts['Date']}", parent_id)
     return "ok"
 
 if __name__ == "__main__":
