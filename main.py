@@ -1,3 +1,6 @@
+# Full updated main.py with /start, /reset, and /help commands
+
+main_py_content = """
 import os
 from flask import Flask, request
 from docxtpl import DocxTemplate
@@ -64,7 +67,7 @@ def transcribe(file_path):
 def enhance_with_gpt(field_name, user_input):
     prompt = (
         f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، "
-        f"مع تجنب المشاعر :\n\n{user_input}"
+        f"مع تجنب المشاعر :\\n\\n{user_input}"
     )
     response = client.chat.completions.create(
         model="gpt-4",
@@ -96,7 +99,7 @@ def send_email(file_path, recipient, investigator_name):
     msg["Subject"] = "تقرير تحقيق تلقائي"
     msg["From"] = EMAIL_SENDER
     msg["To"] = recipient
-    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.\n\nمع تحيات فريق العمل، {investigator_name}.")
+    msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.\\n\\nمع تحيات فريق العمل، {investigator_name}.")
     with open(file_path, "rb") as f:
         msg.add_attachment(
             f.read(),
@@ -119,13 +122,6 @@ def send_webex_message(room_id, message):
     }
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=payload)
 
-def get_next_field(current_fields):
-    for field in expected_fields:
-        if field not in current_fields:
-            return field
-    return None
-
-# === Webhook handler ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -139,42 +135,70 @@ def webhook():
 
     if person_id == msg_data.get("personId"):
         user_id = person_id
+        message_text = msg_data.get("text", "").strip()
+
+        if message_text == "/start":
+            user_state[user_id] = {"step": 0, "data": {}}
+            send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\nسنجمع المعلومات خطوة بخطوة.\n🟢 للبدء، أرسل تسجيل صوتي يحتوي على:")
+            send_webex_message(room_id, field_prompts[expected_fields[0]])
+            return "OK"
+
+        elif message_text == "/reset":
+            user_state.pop(user_id, None)
+            send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل /start للبدء من جديد.")
+            return "OK"
+
+        elif message_text == "/help":
+            help_msg = (
+                "📌 أوامر البوت:\\n"
+                "/start – بدء إدخال تقرير جديد\\n"
+                "/reset – إعادة ضبط الجلسة\\n"
+                "/help – عرض هذه التعليمات\\n"
+                "🎙️ أرسل تسجيل صوتي في كل خطوة"
+            )
+            send_webex_message(room_id, help_msg)
+            return "OK"
 
         if user_id not in user_state:
-            user_state[user_id] = {"step": 0, "data": {}}
-            send_webex_message(room_id, "🤖 أهلاً بك. سنبدأ بجمع معلومات التقرير خطوة بخطوة.")
-            send_webex_message(room_id, field_prompts[expected_fields[0]])
-        else:
-            state = user_state[user_id]
-            step = state["step"]
+            send_webex_message(room_id, "⚠️ لم يتم بدء جلسة بعد. أرسل /start للبدء.")
+            return "OK"
 
-            if "files" in msg_data:
-                file_url = msg_data["files"][0]
-                audio = requests.get(file_url, headers=headers)
-                with open("voice.mp4", "wb") as f:
-                    f.write(audio.content)
+        state = user_state[user_id]
+        step = state["step"]
 
-                transcribed = transcribe("voice.mp4")
-                current_field = expected_fields[step]
-                enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
+        if "files" in msg_data:
+            file_url = msg_data["files"][0]
+            audio = requests.get(file_url, headers=headers)
+            with open("voice.mp4", "wb") as f:
+                f.write(audio.content)
 
-                state["data"][current_field] = enhanced
-                state["step"] += 1
+            transcribed = transcribe("voice.mp4")
+            current_field = expected_fields[step]
+            enhanced = enhance_with_gpt(field_names_ar[current_field], transcribed)
 
-                if state["step"] < len(expected_fields):
-                    next_field = expected_fields[state["step"]]
-                    send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
-                else:
-                    send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
-                    filename = generate_report(state["data"])
-                    email_to = investigator_emails.get(state["data"]["Investigator"], DEFAULT_EMAIL_RECEIVER)
-                    send_email(filename, email_to, state["data"]["Investigator"])
-                    send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {email_to}")
-                    user_state.pop(user_id)
+            state["data"][current_field] = enhanced
+            state["step"] += 1
+
+            if state["step"] < len(expected_fields):
+                next_field = expected_fields[state["step"]]
+                send_webex_message(room_id, f"✅ تم تسجيل {field_names_ar[current_field]}.\n{field_prompts[next_field]}")
             else:
-                send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
+                send_webex_message(room_id, "✅ تم استلام جميع البيانات. جاري إعداد التقرير...")
+                filename = generate_report(state["data"])
+                email_to = investigator_emails.get(state["data"]["Investigator"], DEFAULT_EMAIL_RECEIVER)
+                send_email(filename, email_to, state["data"]["Investigator"])
+                send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {email_to}")
+                user_state.pop(user_id)
+        else:
+            send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
 
     return "OK"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+"""
+with open("/mnt/data/main.py", "w", encoding="utf-8") as f:
+    f.write(main_py_content)
+
+"/mnt/data/main.py"
+
