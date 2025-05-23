@@ -1,3 +1,6 @@
+# Full fixed code for Webex bot with persistent user state across requests
+
+code = """
 import os
 import json
 from flask import Flask, request
@@ -5,38 +8,33 @@ from docxtpl import DocxTemplate
 from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx import Document
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from pydub import AudioSegment
 from email.message import EmailMessage
 import smtplib
 from openai import OpenAI
 import requests
-from pathlib import Path
 
-# === Config ===
+WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
 OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 DEFAULT_EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
-WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
-STATE_PATH = Path("/mnt/data/user_state.json")
 
 client = OpenAI(api_key=OPENAI_KEY)
 app = Flask(__name__)
 
-# === Persistent User State ===
-def load_state():
-    if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
-    return {}
+state_file_path = "/mnt/data/user_state.json"
+if os.path.exists(state_file_path):
+    with open(state_file_path, "r", encoding="utf-8") as f:
+        user_state = json.load(f)
+else:
+    user_state = {}
 
-def save_state(state):
-    STATE_PATH.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+def save_state():
+    with open(state_file_path, "w", encoding="utf-8") as f:
+        json.dump(user_state, f, ensure_ascii=False)
 
-user_state = load_state()
-
-# === Config ===
 investigator_names = [
     "المقدم محمد علي القاسم",
     "النقيب عبدالله راشد ال علي",
@@ -52,7 +50,6 @@ expected_fields = [
     "Investigator", "Date", "Briefing", "LocationObservations",
     "Examination", "Outcomes", "TechincalOpinion"
 ]
-
 field_prompts = {
     "Investigator": "🧑‍✈️ يرجى اختيار اسم الفاحص من القائمة.",
     "Date": "🎙️ أرسل تاريخ الواقعة.",
@@ -62,7 +59,6 @@ field_prompts = {
     "Outcomes": "🎙️ أرسل النتيجة.",
     "TechincalOpinion": "🎙️ أرسل الرأي الفني."
 }
-
 field_names_ar = {
     "Investigator": "الفاحص",
     "Date": "التاريخ",
@@ -73,7 +69,6 @@ field_names_ar = {
     "TechincalOpinion": "الرأي الفني"
 }
 
-# === Utilities ===
 def transcribe(file_path):
     audio = AudioSegment.from_file(file_path)
     audio.export("converted.wav", format="wav")
@@ -87,7 +82,7 @@ def enhance_with_gpt(field_name, user_input):
     elif field_name == "Date":
         prompt = f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 25/مايو/2025. النص:\n\n{user_input}"
     else:
-        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر :\n\n{user_input}"
+        prompt = f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، مع تجنب المشاعر:\n\n{user_input}"
     response = client.chat.completions.create(model="gpt-4", messages=[{"role": "user", "content": prompt}])
     return response.choices[0].message.content.strip()
 
@@ -98,8 +93,6 @@ def format_report_doc(path):
             run.font.name = "Dubai"
             run._element.rPr.rFonts.set(qn("w:eastAsia"), "Dubai")
             run.font.size = Pt(13)
-        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-        paragraph.paragraph_format.right_to_left = True
     doc.save(path)
 
 def generate_report(data):
@@ -142,21 +135,22 @@ def send_investigator_card(room_id):
                     "style": "expanded",
                     "choices": [{"title": name, "value": name} for name in investigator_names]
                 }],
-                "actions": [{"type": "Action.Submit", "title": "إرسال"}]
+                "actions": [{
+                    "type": "Action.Submit",
+                    "title": "إرسال"
+                }]
             }
         }]
     }
     headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}", "Content-Type": "application/json"}
     requests.post("https://webexapis.com/v1/messages", headers=headers, json=card)
 
-# === Flask Routes ===
 @app.route("/")
 def index():
     return "Bot is running", 200
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    global user_state
     data = request.json
     print("🔥 Webhook:", json.dumps(data, ensure_ascii=False, indent=2), flush=True)
 
@@ -165,56 +159,57 @@ def webhook():
         person_id = data["data"]["personId"]
         room_id = data["data"]["roomId"]
 
-        if user_state.get(person_id, {}).get("handled_action") == action_id:
+        if person_id in user_state and user_state[person_id].get("handled_action") == action_id:
             print("⚠️ Duplicate action ignored")
             return "OK"
 
-        action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}",
-                                   headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
-        print("📩 Adaptive Card Submission Data:", json.dumps(action_data, ensure_ascii=False, indent=2), flush=True)
-
+        action_response = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"})
+        action_data = action_response.json()
         selected = action_data["inputs"].get("investigator")
+
         if selected:
             user_state[person_id] = {
                 "step": 1,
                 "data": {"Investigator": selected},
                 "handled_action": action_id
             }
-            save_state(user_state)
+            save_state()
             send_webex_message(room_id, f"✅ تم اختيار {selected}.\n{field_prompts['Date']}")
             return "OK"
 
-    message_id = data["data"]["id"]
     room_id = data["data"]["roomId"]
+    message_id = data["data"]["id"]
     person_id = data["data"]["personId"]
 
     headers = {"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
-    msg = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers).json()
+    msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
+    msg_data = msg_response.json()
 
-    if msg.get("personEmail") == WEBEX_BOT_EMAIL:
+    if msg_data.get("personEmail") == WEBEX_BOT_EMAIL:
         return "OK"
 
-    if msg.get("text", "").strip() == "/reset":
+    if msg_data.get("text", "").strip() == "/reset":
         user_state.pop(person_id, None)
-        save_state(user_state)
+        save_state()
         send_webex_message(room_id, "🔄 تم إعادة ضبط الجلسة. أرسل رسالة جديدة للبدء.")
         return "OK"
 
     if person_id not in user_state:
-        send_webex_message(room_id,
+        send_webex_message(room_id, (
             "👋 مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n"
             "🎙️ سيتم إدخال البيانات عبر تسجيلات صوتية خطوة بخطوة.\n"
             "🔄 لإعادة البدء أرسل /reset\n"
-            "ℹ️ للمساعدة أرسل /help")
+            "ℹ️ للمساعدة أرسل /help"
+        ))
         send_investigator_card(room_id)
         return "OK"
 
-    if "files" in msg:
+    if "files" in msg_data:
         state = user_state[person_id]
         step = state["step"]
         current_field = expected_fields[step]
 
-        file_url = msg["files"][0]
+        file_url = msg_data["files"][0]
         audio = requests.get(file_url, headers=headers)
         with open("voice.mp4", "wb") as f:
             f.write(audio.content)
@@ -224,7 +219,7 @@ def webhook():
 
         state["data"][current_field] = enhanced
         state["step"] += 1
-        save_state(user_state)
+        save_state()
 
         if state["step"] < len(expected_fields):
             next_field = expected_fields[state["step"]]
@@ -235,7 +230,7 @@ def webhook():
             send_email(filename, DEFAULT_EMAIL_RECEIVER, state["data"]["Investigator"])
             send_webex_message(room_id, f"📩 تم إرسال التقرير إلى {DEFAULT_EMAIL_RECEIVER}")
             user_state.pop(person_id)
-            save_state(user_state)
+            save_state()
     else:
         send_webex_message(room_id, "🎙️ الرجاء إرسال تسجيل صوتي.")
 
@@ -243,3 +238,6 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+"""
+
+code
