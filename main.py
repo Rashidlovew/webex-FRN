@@ -42,7 +42,7 @@ field_prompts = {
     "Examination": "🎙️ أرسل نتيجة الفحص الفني.",
     "Outcomes": "🎙️ أرسل النتيجة.",
     "TechincalOpinion": "🎙️ أرسل الرأي الفني.",
-    "Investigator": "🧑‍✈️ أرسل اسم المحقق."
+    "Investigator": "🧑‍✈️ أرسل اسم الفاحص."
 }
 field_names_ar = {
     "Date": "التاريخ",
@@ -51,7 +51,7 @@ field_names_ar = {
     "Examination": "نتيجة الفحص الفني",
     "Outcomes": "النتيجة",
     "TechincalOpinion": "الرأي الفني",
-    "Investigator": "المحقق"
+    "Investigator": "الفاحص"
 }
 user_state = {}
 
@@ -64,10 +64,21 @@ def transcribe(file_path):
     return result.text
 
 def enhance_with_gpt(field_name, user_input):
-    prompt = (
-        f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، "
-        f"مع تجنب المشاعر :\n\n{user_input}"
-    )
+    if field_name == "TechincalOpinion":
+        prompt = (
+            f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، "
+            f"وباستخدام لغة رسمية وعربية فصحى:\n\n{user_input}"
+        )
+    elif field_name == "Date":
+        prompt = (
+            f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 20/مايو/2025. النص:\n\n{user_input}"
+        )
+    else:
+        prompt = (
+            f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، "
+            f"مع تجنب المشاعر :\n\n{user_input}"
+        )
+
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
@@ -77,8 +88,8 @@ def enhance_with_gpt(field_name, user_input):
 def format_report_doc(path):
     doc = Document(path)
     for paragraph in doc.paragraphs:
-        paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-        paragraph._element.set(qn("w:rtl"), "1")
+     #   paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+      #  paragraph._element.set(qn("w:rtl"), "1")
         for run in paragraph.runs:
             run.font.name = "Dubai"
             run._element.rPr.rFonts.set(qn("w:eastAsia"), "Dubai")
@@ -86,7 +97,7 @@ def format_report_doc(path):
     doc.save(path)
 
 def generate_report(data):
-    filename = f"تقرير_التحقيق_{data['Investigator'].replace(' ', '_')}.docx"
+    filename = f"تقرير الفحص {data['Investigator'].replace(' ', '_')}.docx"
     doc = DocxTemplate("police_report_template.docx")
     doc.render(data)
     doc.save(filename)
@@ -95,7 +106,7 @@ def generate_report(data):
 
 def send_email(file_path, recipient, investigator_name):
     msg = EmailMessage()
-    msg["Subject"] = "تقرير تحقيق تلقائي"
+    msg["Subject"] = "تقرير فحص تلقائي"
     msg["From"] = EMAIL_SENDER
     msg["To"] = recipient
     msg.set_content(f"📎 يرجى مراجعة التقرير المرفق.\n\nمع تحيات فريق العمل، {investigator_name}.")
