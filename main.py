@@ -1,6 +1,3 @@
-from pathlib import Path
-
-fixed_bot_code = """
 import os
 import json
 import tempfile
@@ -15,7 +12,7 @@ import smtplib
 from email.message import EmailMessage
 from pydub import AudioSegment
 
-# Config
+# Configuration
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
 OPENAI_KEY = os.environ["OPENAI_KEY"]
 EMAIL_SENDER = os.environ["EMAIL_SENDER"]
@@ -25,7 +22,7 @@ BOT_EMAIL = "FRN.ENG@webex.bot"
 TEMPLATE_FILE = "police_report_template.docx"
 STATE_FILE = "user_state.json"
 
-# Load or init state
+# Load or initialize state
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         user_state = json.load(f)
@@ -65,8 +62,6 @@ def format_paragraph(p):
         run.font.name = 'Dubai'
         run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Dubai')
         run.font.size = Pt(13)
-        #p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-        # p.paragraph_format.right_to_left = True
 
 def format_report_doc(doc):
     for para in doc.paragraphs:
@@ -118,11 +113,14 @@ def send_email(subject, body, to, attachment_path):
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
 
-def send_message(person_id, text):
+def send_message(person_id, text, parent_id=None):
+    payload = {"toPersonId": person_id, "markdown": text}
+    if parent_id:
+        payload["parentId"] = parent_id
     requests.post("https://webexapis.com/v1/messages", headers={
         "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
         "Content-Type": "application/json"
-    }, json={"toPersonId": person_id, "markdown": text})
+    }, json=payload)
 
 def send_adaptive_card(person_id):
     buttons = [{"type": "Action.Submit", "title": name, "data": {"investigator": name}} for name in investigator_names]
@@ -148,12 +146,12 @@ def webhook():
         return "ok"
     user_id = data["data"]["personId"]
     email = data["data"].get("personEmail", "")
+    parent_id = data["data"]["id"]
     if email == BOT_EMAIL:
         return "ok"
-    msg_id = data["data"]["id"]
 
     if data["resource"] == "messages":
-        msg = requests.get(f"https://webexapis.com/v1/messages/{msg_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
+        msg = requests.get(f"https://webexapis.com/v1/messages/{parent_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         if "files" in msg:
             file_url = msg["files"][0]
             audio_data = requests.get(file_url, headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).content
@@ -162,7 +160,7 @@ def webhook():
             tmp_file.close()
             step = user_state.get(user_id, {}).get("step")
             if not step:
-                send_message(user_id, "❗ لم يتم تحديد الخطوة الحالية. أرسل /start للبدء.")
+                send_message(user_id, "❗ لم يتم تحديد الخطوة الحالية. أرسل /start للبدء.", parent_id)
                 return "ok"
             text = transcribe_audio(tmp_file.name)
             result = enhance_field(text, step)
@@ -171,33 +169,28 @@ def webhook():
             if next_index < len(field_steps):
                 next_step = field_steps[next_index]
                 user_state[user_id]["step"] = next_step
-                send_message(user_id, f"{field_labels[step]} ✅\n{field_prompts[next_step]}")
+                send_message(user_id, f"{field_labels[step]} ✅\n{field_prompts[next_step]}", parent_id)
             else:
                 data_dict = user_state[user_id]["data"]
                 report_file = f"report_{data_dict['Investigator']}.docx"
                 generate_report(data_dict, report_file)
                 send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
-                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}!")
+                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}!", parent_id)
                 user_state.pop(user_id)
             save_user_state()
         else:
             if user_id not in user_state:
                 user_state[user_id] = {"step": "Investigator", "data": {}}
-                send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n📌 أرسل ملاحظة صوتية عند كل طلب.")
+                send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id)
                 send_adaptive_card(user_id)
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
         action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         selection = action_data["inputs"]["investigator"]
         user_state[user_id] = {"step": "Date", "data": {"Investigator": selection}}
-        send_message(user_id, f"{field_labels['Investigator']} ✅\n{field_prompts['Date']}")
+        send_message(user_id, f"{field_labels['Investigator']} ✅\n{field_prompts['Date']}", parent_id)
         save_user_state()
     return "ok"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
-"""
-
-code_output_path = Path("/mnt/data/final_clean_fixed_bot.py")
-code_output_path.write_text(fixed_bot_code.strip(), encoding="utf-8")
-code_output_path
