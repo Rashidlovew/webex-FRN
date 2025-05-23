@@ -11,6 +11,8 @@ import smtplib
 from openai import OpenAI
 import requests
 
+WEBEX_BOT_EMAIL = "FRN.ENG@webex.bot"
+
 # === Configuration ===
 WEBEX_BOT_TOKEN = os.environ["WEBEX_BOT_TOKEN"]
 OPENAI_KEY = os.environ["OPENAI_KEY"]
@@ -134,18 +136,21 @@ def webhook():
     msg_response = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers=headers)
     msg_data = msg_response.json()
 
-    if msg_data.get("personId") == person_id:
+    # Ignore bot's own messages
+    if msg_data.get("personEmail") == WEBEX_BOT_EMAIL:
         return "OK"
 
-    if "message_id_handled" in user_state.get(person_id, {}) and user_state[person_id]["message_id_handled"] == message_id:
+    user_state.setdefault(person_id, {})
+    if user_state[person_id].get("message_id_handled") == message_id:
         return "OK"
 
-    user_state.setdefault(person_id, {})["message_id_handled"] = message_id
+    user_state[person_id]["message_id_handled"] = message_id
     message_text = msg_data.get("text", "").strip()
 
+    # Handle commands
     if message_text == "/start":
         user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
-        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\nسنجمع المعلومات خطوة بخطوة.\n🟢 للبدء، أرسل تسجيل صوتي يحتوي على:")
+        send_webex_message(room_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n🟢 أرسل تسجيل صوتي يحتوي على:")
         send_webex_message(room_id, field_prompts[expected_fields[0]])
         return "OK"
 
@@ -165,7 +170,7 @@ def webhook():
         send_webex_message(room_id, help_msg)
         return "OK"
 
-    # Welcome message if session not started
+    # Welcome message if no session yet
     if person_id not in user_state or "step" not in user_state[person_id]:
         user_state[person_id] = {"step": 0, "data": {}, "message_id_handled": message_id}
         send_webex_message(room_id, (
@@ -181,6 +186,7 @@ def webhook():
     state = user_state[person_id]
     step = state["step"]
 
+    # Handle voice input
     if "files" in msg_data:
         file_url = msg_data["files"][0]
         audio = requests.get(file_url, headers=headers)
