@@ -130,10 +130,8 @@ def send_email(subject, body, to, attachment_path):
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
 
-def send_message(person_id, text, parent_id=None):
+def send_message(person_id, text):
     payload = {"toPersonId": person_id, "markdown": text}
-    if parent_id:
-        payload["parentId"] = parent_id
     requests.post("https://webexapis.com/v1/messages", headers={
         "Authorization": f"Bearer {WEBEX_BOT_TOKEN}",
         "Content-Type": "application/json"
@@ -163,58 +161,93 @@ def webhook():
         return "ok"
     user_id = data["data"]["personId"]
     email = data["data"].get("personEmail", "")
-    message_id = data["data"].get("id")  # Use this for message reply context
+    message_id = data["data"].get("id")
     if email == BOT_EMAIL:
         return "ok"
 
     if data["resource"] == "messages":
         msg = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
-        if "files" in msg:
-            file_url = msg["files"][0]
-            audio_data = requests.get(file_url, headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).content
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
-            tmp_file.write(audio_data)
-            tmp_file.close()
-            step = user_state.get(user_id, {}).get("step")
-            if not step:
-                send_message(user_id, "❗ لم يتم تحديد الخطوة الحالية. أرسل /start للبدء.", parent_id=message_id)
-                return "ok"
-            text = transcribe_audio(tmp_file.name)
-            result = enhance_with_gpt(step, text)
-            user_state.setdefault(user_id, {}).setdefault("data", {})[step] = result
-            next_index = expected_fields.index(step) + 1
-            if next_index < len(expected_fields):
-                next_step = expected_fields[next_index]
-                user_state[user_id]["step"] = next_step
-                send_message(user_id, f"{field_names_ar[step]} ✅\n{field_prompts[next_step]}", parent_id=message_id)
-            else:
-                data_dict = user_state[user_id]["data"]
-                report_file = f"report_{data_dict['Investigator']}.docx"
-                generate_report(data_dict, report_file)
-                send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
-                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح و إرساله الى البريد الالكتروني الخاص بالقوة.\nشكراً لك {data_dict['Investigator']}", parent_id=message_id)
-                user_state.pop(user_id)
+        text_raw = msg.get("text", "").strip()
+
+        # Handle /startover
+        if text_raw == "/startover":
+            user_state[user_id] = {"step": "Investigator", "data": {}}
+            send_message(user_id, "🔄 تم إعادة البدء. يرجى اختيار اسم الفاحص:")
+            send_adaptive_card(user_id)
             save_user_state()
+            return "ok"
+
+        # Handle /repeat
+        if text_raw == "/repeat":
+            step = user_state.get(user_id, {}).get("step")
+            if step:
+                send_message(user_id, f"↩️ يرجى إعادة إرسال {field_names_ar[step]}:\n{field_prompts[step]}")
+            else:
+                send_message(user_id, "⚠️ لا يمكن إعادة الخطوة الحالية لأن المحادثة لم تبدأ.\nأرسل /startover للبدء من جديد.")
+            return "ok"
+
+        if "files" not in msg:
+            send_message(user_id, "⚠️ لم أستلم رسالة صوتية. الرجاء إرسال ملاحظة صوتية تتعلق بالطلب الحالي.")
+            return "ok"
+
+        step = user_state.get(user_id, {}).get("step")
+        if not step:
+            send_message(user_id, "⚠️ لم يتم تحديد الفاحص بعد.\n👤 يرجى اختيار اسم الفاحص أولاً.")
+            send_adaptive_card(user_id)
+            return "ok"
+
+        file_url = msg["files"][0]
+        audio_data = requests.get(file_url, headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).content
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
+        tmp_file.write(audio_data)
+        tmp_file.close()
+
+        try:
+            text = transcribe_audio(tmp_file.name)
+        except Exception:
+            send_message(user_id, "❗ حدث خطأ أثناء تحويل الصوت إلى نص. الرجاء إعادة المحاولة.")
+            return "ok"
+
+        try:
+            result = enhance_with_gpt(step, text)
+        except Exception:
+            send_message(user_id, "❗ حدث خطأ أثناء استخدام الذكاء الاصطناعي لإعادة الصياغة. الرجاء المحاولة لاحقاً.")
+            return "ok"
+
+        user_state.setdefault(user_id, {}).setdefault("data", {})[step] = result
+        next_index = expected_fields.index(step) + 1
+
+        if next_index < len(expected_fields):
+            next_step = expected_fields[next_index]
+            user_state[user_id]["step"] = next_step
+            send_message(user_id, f"{field_names_ar[step]} ✅\n{field_prompts[next_step]}")
         else:
-            if user_id not in user_state:
-                user_state[user_id] = {"step": "Investigator", "data": {}}
-                send_message(user_id, "👋  مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id=message_id)
-                send_adaptive_card(user_id)
+            data_dict = user_state[user_id]["data"]
+            missing_fields = [f for f in expected_fields if f not in data_dict]
+            if missing_fields:
+                next_missing = missing_fields[0]
+                user_state[user_id]["step"] = next_missing
+                send_message(user_id, f"⚠️ لم يتم استلام البيانات التالية: {field_names_ar[next_missing]}")
+                send_message(user_id, field_prompts[next_missing])
+                return "ok"
+
+            report_file = f"report_{data_dict['Investigator']}.docx"
+            generate_report(data_dict, report_file)
+            send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
+            send_message(user_id, f"📄 تم إنشاء التقرير بنجاح و إرساله الى البريد الالكتروني الخاص بالقوة.\nشكراً لك {data_dict['Investigator']}")
+            user_state.pop(user_id)
+
+        save_user_state()
 
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
-        message_id = data["data"]["messageId"]  # ✅ Fix: use messageId for reply
         action_data = requests.get(
             f"https://webexapis.com/v1/attachment/actions/{action_id}",
             headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
         ).json()
         selection = action_data["inputs"]["investigator"]
         user_state[user_id] = {"step": expected_fields[0], "data": {"Investigator": selection}}
-        send_message(
-            user_id,
-            f"تم اختيار الفاحص: {selection} ✅\n{field_prompts[expected_fields[0]]}",
-            parent_id=message_id
-        )
+        send_message(user_id, f"تم اختيار الفاحص: {selection} ✅\n{field_prompts[expected_fields[0]]}")
         save_user_state()
 
     return "ok"
