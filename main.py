@@ -1,6 +1,3 @@
-from pathlib import Path
-
-updated_code = """
 import os
 import json
 import tempfile
@@ -10,7 +7,6 @@ from openai import OpenAI
 from docxtpl import DocxTemplate
 from docx.shared import Pt
 from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import smtplib
 from email.message import EmailMessage
 from pydub import AudioSegment
@@ -25,7 +21,7 @@ BOT_EMAIL = "FRN.ENG@webex.bot"
 TEMPLATE_FILE = "police_report_template.docx"
 STATE_FILE = "user_state.json"
 
-# Load or initialize state
+# Load or initialize user state
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         user_state = json.load(f)
@@ -190,7 +186,7 @@ def webhook():
             if next_index < len(expected_fields):
                 next_step = expected_fields[next_index]
                 user_state[user_id]["step"] = next_step
-                send_message(user_id, f"{field_names_ar[step]} ✅\\n{field_prompts[next_step]}", parent_id)
+                send_message(user_id, f"{field_names_ar[step]} ✅\n{field_prompts[next_step]}", parent_id)
             else:
                 data_dict = user_state[user_id]["data"]
                 report_file = f"report_{data_dict['Investigator']}.docx"
@@ -209,18 +205,11 @@ def webhook():
         action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         selection = action_data["inputs"]["investigator"]
         user_state[user_id] = {"step": expected_fields[0], "data": {"Investigator": selection}}
-        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\\n{field_prompts[expected_fields[0]]}", parent_id)
+        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\n{field_prompts[expected_fields[0]]}", parent_id)
         save_user_state()
     return "ok"
 
+# ✅ Port binding fix for Render
 if __name__ == "__main__":
-    
-    
     print(f"🌐 Server starting on port {int(os.environ.get('PORT', 10000))}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-"""
-
-#final_path = Path("/mnt/data/final_bot_with_custom_enhancement.py")
-#final_path.write_text(updated_code.strip(), encoding="utf-8")
-#final_path
