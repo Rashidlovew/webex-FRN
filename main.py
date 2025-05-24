@@ -72,7 +72,7 @@ def format_paragraph(p):
         run = p.runs[0]
         run.font.name = 'Dubai'
         run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Dubai')
-        run.font.size = Pt(17)
+        run.font.size = Pt(13)
 
 def format_report_doc(doc):
     for para in doc.paragraphs:
@@ -144,7 +144,7 @@ def send_adaptive_card(person_id):
     card = {
         "type": "AdaptiveCard",
         "version": "1.3",
-        "body": [{"type": "TextBlock", "text": "👤 اختر اسم المحقق:", "weight": "bolder"}],
+        "body": [{"type": "TextBlock", "text": "👤 اختر اسم الفاحص:", "weight": "bolder"}],
         "actions": buttons
     }
     requests.post("https://webexapis.com/v1/messages", headers={
@@ -152,7 +152,7 @@ def send_adaptive_card(person_id):
         "Content-Type": "application/json"
     }, json={
         "toPersonId": person_id,
-        "markdown": "اختر اسم المحقق:",
+        "markdown": "اختر اسم الفاحص ثم ارسل رسالة صوتية متضمنة تاريخ الواقعة :",
         "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": card}]
     })
 
@@ -192,20 +192,20 @@ def webhook():
                 report_file = f"report_{data_dict['Investigator']}.docx"
                 generate_report(data_dict, report_file)
                 send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
-                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}!", parent_id)
+                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}", parent_id)
                 user_state.pop(user_id)
             save_user_state()
         else:
             if user_id not in user_state:
                 user_state[user_id] = {"step": "Investigator", "data": {}}
-                send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id)
+                send_message(user_id, "👋  مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id)
                 send_adaptive_card(user_id)
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
         action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         selection = action_data["inputs"]["investigator"]
         user_state[user_id] = {"step": expected_fields[0], "data": {"Investigator": selection}}
-        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\n{field_prompts[expected_fields[0]]}", parent_id)
+        send_message(user_id, f"تم اختيار الفاحص: {selection} ✅\n{field_prompts[expected_fields[0]]}", parent_id)
         save_user_state()
     return "ok"
 
