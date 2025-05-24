@@ -144,7 +144,7 @@ def send_adaptive_card(person_id):
     card = {
         "type": "AdaptiveCard",
         "version": "1.3",
-        "body": [{"type": "TextBlock", "text": "👤 اختر اسم الفاحص:", "weight": "bolder"}],
+        "body": [{"type": "TextBlock", "text": "👤  اختر اسم الفاحص ثم أرسل رسالة صوتية تتضمن تاريخ الواقعة:", "weight": "bolder"}],
         "actions": buttons
     }
     requests.post("https://webexapis.com/v1/messages", headers={
