@@ -163,12 +163,12 @@ def webhook():
         return "ok"
     user_id = data["data"]["personId"]
     email = data["data"].get("personEmail", "")
-    parent_id = data["data"]["id"]
+    message_id = data["data"].get("id")  # Use this for message reply context
     if email == BOT_EMAIL:
         return "ok"
 
     if data["resource"] == "messages":
-        msg = requests.get(f"https://webexapis.com/v1/messages/{parent_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
+        msg = requests.get(f"https://webexapis.com/v1/messages/{message_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         if "files" in msg:
             file_url = msg["files"][0]
             audio_data = requests.get(file_url, headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).content
@@ -177,7 +177,7 @@ def webhook():
             tmp_file.close()
             step = user_state.get(user_id, {}).get("step")
             if not step:
-                send_message(user_id, "❗ لم يتم تحديد الخطوة الحالية. أرسل /start للبدء.", parent_id)
+                send_message(user_id, "❗ لم يتم تحديد الخطوة الحالية. أرسل /start للبدء.", parent_id=message_id)
                 return "ok"
             text = transcribe_audio(tmp_file.name)
             result = enhance_with_gpt(step, text)
@@ -186,30 +186,40 @@ def webhook():
             if next_index < len(expected_fields):
                 next_step = expected_fields[next_index]
                 user_state[user_id]["step"] = next_step
-                send_message(user_id, f"{field_names_ar[step]} ✅\n{field_prompts[next_step]}", parent_id)
+                send_message(user_id, f"{field_names_ar[step]} ✅\n{field_prompts[next_step]}", parent_id=message_id)
             else:
                 data_dict = user_state[user_id]["data"]
                 report_file = f"report_{data_dict['Investigator']}.docx"
                 generate_report(data_dict, report_file)
                 send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
-                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}", parent_id)
+                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}", parent_id=message_id)
                 user_state.pop(user_id)
             save_user_state()
         else:
             if user_id not in user_state:
                 user_state[user_id] = {"step": "Investigator", "data": {}}
-                send_message(user_id, "👋  مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id)
+                send_message(user_id, "👋  مرحباً بك في بوت إعداد تقارير الفحص الخاص بقسم الهندسة الجنائية.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id=message_id)
                 send_adaptive_card(user_id)
+
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
-        action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
+        message_id = data["data"]["messageId"]  # ✅ Fix: use messageId for reply
+        action_data = requests.get(
+            f"https://webexapis.com/v1/attachment/actions/{action_id}",
+            headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}
+        ).json()
         selection = action_data["inputs"]["investigator"]
         user_state[user_id] = {"step": expected_fields[0], "data": {"Investigator": selection}}
-        send_message(user_id, f"تم اختيار الفاحص: {selection} ✅\n{field_prompts[expected_fields[0]]}", parent_id)
+        send_message(
+            user_id,
+            f"تم اختيار الفاحص: {selection} ✅\n{field_prompts[expected_fields[0]]}",
+            parent_id=message_id
+        )
         save_user_state()
+
     return "ok"
 
-# ✅ Port binding fix for Render
+# ✅ Port binding for Render
 if __name__ == "__main__":
     print(f"🌐 Server starting on port {int(os.environ.get('PORT', 10000))}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
