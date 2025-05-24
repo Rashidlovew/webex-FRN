@@ -1,3 +1,6 @@
+from pathlib import Path
+
+updated_code = """
 import os
 import json
 import tempfile
@@ -7,6 +10,7 @@ from openai import OpenAI
 from docxtpl import DocxTemplate
 from docx.shared import Pt
 from docx.oxml.ns import qn
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import smtplib
 from email.message import EmailMessage
 from pydub import AudioSegment
@@ -21,14 +25,14 @@ BOT_EMAIL = "FRN.ENG@webex.bot"
 TEMPLATE_FILE = "police_report_template.docx"
 STATE_FILE = "user_state.json"
 
-# Load state
+# Load or initialize state
 if os.path.exists(STATE_FILE):
     with open(STATE_FILE, "r", encoding="utf-8") as f:
         user_state = json.load(f)
         print("ℹ️ Loaded previous state")
 else:
     user_state = {}
-    print("ℹ️ No previous state found")
+    print("ℹ️ No previous state found.")
 
 def save_user_state():
     with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -44,15 +48,27 @@ investigator_names = [
     "المدني امنه خالد المازمي", "المدني حمده ماجد ال علي"
 ]
 
-field_steps = ["Investigator", "Date", "Briefing"]
+expected_fields = [
+    "Date", "Briefing", "LocationObservations",
+    "Examination", "Outcomes", "TechincalOpinion"
+]
+
 field_prompts = {
-    "Date": "🗓️ الرجاء إرسال التاريخ كملاحظة صوتية.",
-    "Briefing": "📝 الرجاء إرسال ملخص الفحص كملاحظة صوتية."
+    "Date": "🎙️ أرسل تاريخ الواقعة.",
+    "Briefing": "🎙️ أرسل موجز الواقعة.",
+    "LocationObservations": "🎙️ أرسل معاينة الموقع حيث بمعاينة موقع الحادث تبين ما يلي .....",
+    "Examination": "🎙️ أرسل نتيجة الفحص الفني ... حيث بفحص موضوع الحادث تبين ما يلي .....",
+    "Outcomes": "🎙️ أرسل النتيجة حيث أنه بعد المعاينة و أجراء الفحوص الفنية اللازمة تبين ما يلي:.",
+    "TechincalOpinion": "🎙️ أرسل الرأي الفني."
 }
-field_labels = {
-    "Investigator": "تم اختيار المحقق",
-    "Date": "تم تسجيل التاريخ",
-    "Briefing": "تم تسجيل الملخص"
+
+field_names_ar = {
+    "Date": "التاريخ",
+    "Briefing": "موجز الواقعة",
+    "LocationObservations": "معاينة الموقع",
+    "Examination": "نتيجة الفحص الفني",
+    "Outcomes": "النتيجة",
+    "TechincalOpinion": "الرأي الفني"
 }
 
 def format_paragraph(p):
@@ -60,7 +76,7 @@ def format_paragraph(p):
         run = p.runs[0]
         run.font.name = 'Dubai'
         run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Dubai')
-        run.font.size = Pt(13)
+        run.font.size = Pt(17)
 
 def format_report_doc(doc):
     for para in doc.paragraphs:
@@ -84,21 +100,27 @@ def transcribe_audio(file_path):
         )
     return transcript.text
 
-def enhance_field(text, field):
-    if field == "Date":
-        prompt = f"صيغة التاريخ التالية غير رسمية: '{text}'. صيغه ليكون بصيغة رسمية كاملة."
-    elif field == "Briefing":
-        prompt = f"لخص المقطع الصوتي التالي بأسلوب مهني لتقريره الفني: '{text}'"
+def enhance_with_gpt(field_name, user_input):
+    if field_name == "TechincalOpinion":
+        prompt = (
+            f"يرجى إعادة صياغة ({field_name}) التالية بطريقة مهنية وتحليلية، "
+            f"وباستخدام لغة رسمية وعربية فصحى:\n\n{user_input}"
+        )
+    elif field_name == "Date":
+        prompt = (
+            f"يرجى صياغة تاريخ الواقعة بالتنسيق التالي فقط: 20/مايو/2025. النص:\n\n{user_input}"
+        )
     else:
-        return text
-    chat = client.chat.completions.create(
+        prompt = (
+            f"يرجى إعادة صياغة التالي ({field_name}) باستخدام أسلوب مهني وعربي فصيح، "
+            f"مع تجنب المشاعر :\n\n{user_input}"
+        )
+
+    response = client.chat.completions.create(
         model="gpt-4",
-        messages=[
-            {"role": "system", "content": "أنت مساعد محترف تكتب تقارير فنية بأسلوب رسمي."},
-            {"role": "user", "content": prompt}
-        ]
+        messages=[{"role": "user", "content": prompt}]
     )
-    return chat.choices[0].message.content.strip()
+    return response.choices[0].message.content.strip()
 
 def send_email(subject, body, to, attachment_path):
     msg = EmailMessage()
@@ -113,10 +135,7 @@ def send_email(subject, body, to, attachment_path):
         smtp.send_message(msg)
 
 def send_message(person_id, text, parent_id=None):
-    payload = {
-        "toPersonId": person_id,
-        "markdown": text
-    }
+    payload = {"toPersonId": person_id, "markdown": text}
     if parent_id:
         payload["parentId"] = parent_id
     requests.post("https://webexapis.com/v1/messages", headers={
@@ -148,7 +167,7 @@ def webhook():
         return "ok"
     user_id = data["data"]["personId"]
     email = data["data"].get("personEmail", "")
-    parent_id = data["data"].get("id", None)
+    parent_id = data["data"]["id"]
     if email == BOT_EMAIL:
         return "ok"
 
@@ -165,19 +184,15 @@ def webhook():
                 send_message(user_id, "❗ لم يتم تحديد الخطوة الحالية. أرسل /start للبدء.", parent_id)
                 return "ok"
             text = transcribe_audio(tmp_file.name)
-            result = enhance_field(text, step)
+            result = enhance_with_gpt(step, text)
             user_state.setdefault(user_id, {}).setdefault("data", {})[step] = result
-
-            next_index = field_steps.index(step) + 1
-            if next_index < len(field_steps):
-                next_step = field_steps[next_index]
+            next_index = expected_fields.index(step) + 1
+            if next_index < len(expected_fields):
+                next_step = expected_fields[next_index]
                 user_state[user_id]["step"] = next_step
-                send_message(user_id, f"{field_labels[step]} ✅\n{field_prompts[next_step]}", parent_id)
+                send_message(user_id, f"{field_names_ar[step]} ✅\\n{field_prompts[next_step]}", parent_id)
             else:
                 data_dict = user_state[user_id]["data"]
-                if not all(key in data_dict for key in field_steps[1:]):
-                    send_message(user_id, "❗ البيانات غير مكتملة. تأكد من إرسال جميع الملاحظات الصوتية.", parent_id)
-                    return "ok"
                 report_file = f"report_{data_dict['Investigator']}.docx"
                 generate_report(data_dict, report_file)
                 send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
@@ -189,15 +204,19 @@ def webhook():
                 user_state[user_id] = {"step": "Investigator", "data": {}}
                 send_message(user_id, "👋 مرحباً بك في بوت إعداد تقارير الفحص.\n📌 أرسل ملاحظة صوتية عند كل طلب.", parent_id)
                 send_adaptive_card(user_id)
-
     elif data["resource"] == "attachmentActions":
         action_id = data["data"]["id"]
         action_data = requests.get(f"https://webexapis.com/v1/attachment/actions/{action_id}", headers={"Authorization": f"Bearer {WEBEX_BOT_TOKEN}"}).json()
         selection = action_data["inputs"]["investigator"]
-        user_state[user_id] = {"step": "Date", "data": {"Investigator": selection}}
+        user_state[user_id] = {"step": expected_fields[0], "data": {"Investigator": selection}}
+        send_message(user_id, f"تم اختيار المحقق: {selection} ✅\\n{field_prompts[expected_fields[0]]}", parent_id)
         save_user_state()
-        send_message(user_id, f"{field_labels['Investigator']} ✅\n{field_prompts['Date']}", parent_id)
     return "ok"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
+"""
+
+final_path = Path("/mnt/data/final_bot_with_custom_enhancement.py")
+final_path.write_text(updated_code.strip(), encoding="utf-8")
+final_path
