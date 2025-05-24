@@ -144,7 +144,7 @@ def send_adaptive_card(person_id):
     card = {
         "type": "AdaptiveCard",
         "version": "1.3",
-        "body": [{"type": "TextBlock", "text": "👤  اختر اسم الفاحص ثم أرسل رسالة صوتية تتضمن تاريخ الواقعة:", "weight": "bolder"}],
+        "body": [{"type": "TextBlock", "text": "👤  اختر اسم الفاحص :", "weight": "bolder"}],
         "actions": buttons
     }
     requests.post("https://webexapis.com/v1/messages", headers={
@@ -152,7 +152,7 @@ def send_adaptive_card(person_id):
         "Content-Type": "application/json"
     }, json={
         "toPersonId": person_id,
-        "markdown": "اختر اسم الفاحص ثم ارسل رسالة صوتية متضمنة تاريخ الواقعة :",
+        "markdown": "اختر اسم الفاحص  :",
         "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": card}]
     })
 
@@ -192,7 +192,7 @@ def webhook():
                 report_file = f"report_{data_dict['Investigator']}.docx"
                 generate_report(data_dict, report_file)
                 send_email("تم إنشاء التقرير", f"شكرًا {data_dict['Investigator']}، تم إرسال التقرير بالبريد.", DEFAULT_EMAIL_RECEIVER, report_file)
-                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح وإرساله عبر البريد.\nشكراً لك {data_dict['Investigator']}", parent_id=message_id)
+                send_message(user_id, f"📄 تم إنشاء التقرير بنجاح و إرساله الى البريد الالكتروني الخاص بالقوة.\nشكراً لك {data_dict['Investigator']}", parent_id=message_id)
                 user_state.pop(user_id)
             save_user_state()
         else:
